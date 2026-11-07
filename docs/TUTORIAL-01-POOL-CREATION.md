@@ -41,16 +41,13 @@ oc delete vm --all -n ${TUTORIAL_NS} --timeout=30s --ignore-not-found
 oc delete pods --all -n ${TUTORIAL_NS} --force --grace-period=0 --ignore-not-found
 oc delete pvc --all -n ${TUTORIAL_NS} --timeout=60s --ignore-not-found
 
-# 3. Grace period for CSI to cascade SubVolume deletes
-sleep 5
-
-# 4. Force-clean orphan SubVolumes (if CSI cascade didn't finish)
-for sv in $(oc get subvolumes.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null); do
-    oc patch "$sv" --type=merge -p '{"metadata":{"finalizers":null}}'
+# 3. Wait for the driver to delete the SubVolumes (about 35 seconds in a lab run).
+#    Do not delete SubVolumes by hand while this runs.
+for i in $(seq 1 30); do
+    [ -z "$(oc get subvolumes.storage.ibmcloud.io \
+        -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null)" ] && break
+    sleep 5
 done
-oc delete subvolumes.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} --ignore-not-found
 
 # 5. Delete pool (force-remove finalizer if stuck)
 oc delete filesharepool ${POOL_NAME} --timeout=60s --ignore-not-found || {
@@ -123,7 +120,7 @@ EOF
 - `defaultPermissions: "0777"` — ensures the QEMU user (UID 107) can access subdirectories
 - `defaultUID: 107` / `defaultGID: 107` — PVC subdirectories are chowned to the QEMU user, so KubeVirt's virt-handler skips its own chown (see [KubeVirt NFS Permissions](#kubevirt-nfs-permissions) below)
 
-Watch the pool initialize (takes 30-90 seconds for VPC share creation):
+Watch the pool initialize. VPC share creation took 30 seconds to 2 minutes in a lab run (the time varies). The phase shows `Expanding` while the first share is made:
 
 ```bash
 oc get filesharepools -w
@@ -237,9 +234,9 @@ ibmcloud is share-mount-targets <SHARE_ID>
 ibmcloud is share-mount-target <SHARE_ID> <MOUNT_TARGET_ID>
 ```
 
-The `mount_path` field shows the NFS server and export path, e.g.:
+The `Mount path` line shows the NFS server and export path. For a share with security group access, the server is the mount target's IP address, for example:
 ```
-fsf-fra0251a-byok-fz.adn.networklayer.com:/953e01e5_f4c2_4c0c_b715_99ac35879a58
+10.250.0.146:/3e27a9f6_f028_4dc8_8b82_dc022bb825ad
 ```
 
 This is the NFS server that worker nodes connect to when pods use PVCs from this pool.
@@ -296,7 +293,7 @@ oc get pod pool-test-writer -n ${TUTORIAL_NS} -w
 oc logs pool-test-writer -n ${TUTORIAL_NS}
 ```
 
-Expected output:
+Expected output: the `ls -la /data/` listing, then the message:
 ```
 Pool CSI NFS storage is working!
 ```
@@ -406,7 +403,7 @@ spec:
 EOF
 ```
 
-Wait for the download and conversion to complete (~1.8 GB download + conversion, takes 2-5 minutes):
+Wait for the download and conversion to complete (about 1.2 GB download, then conversion. This took 12 minutes in a lab run, because writing the raw image to a 100 IOPS share is slow. Expect 2 to 15 minutes):
 
 ```bash
 # Watch pod status
@@ -426,7 +423,9 @@ Converting qcow2 to raw format...
 -rw-rw-rw-. 1 107 107 10G ... /boot/disk.img
 file format: raw
 virtual size: 10 GiB (10737418240 bytes)
-disk size: 1.8 GiB
+disk size: 1.77 GiB
+Child node '/file':
+    ...
 Done!
 ```
 
@@ -513,7 +512,7 @@ oc get vm pool-test-vm -n ${TUTORIAL_NS} -w
 oc get vmi pool-test-vm -n ${TUTORIAL_NS} -w
 ```
 
-Both PVCs are already provisioned, so the VM should start quickly (30-60 seconds):
+Both PVCs are already provisioned, so the VM should start quickly (13 seconds in a lab run, up to a minute):
 
 ```bash
 # Verify both PVCs are Bound on ${POOL_NAME}
@@ -626,16 +625,14 @@ done
 oc delete pods --all -n ${TUTORIAL_NS} --force --grace-period=0
 oc delete pvc --all -n ${TUTORIAL_NS} --timeout=60s
 
-# 4. Grace period for CSI to cascade SubVolume deletes
-sleep 5
-
-# 5. Force-clean orphan SubVolumes (clear finalizers if CSI cascade didn't finish)
-for sv in $(oc get subvolumes.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null); do
-    oc patch "$sv" --type=merge -p '{"metadata":{"finalizers":null}}'
+# 4. Wait for the driver to delete the SubVolumes. This took about 35 seconds
+#    in a lab run. Do not delete SubVolumes by hand while this runs: the driver
+#    is still removing their data.
+for i in $(seq 1 30); do
+    [ -z "$(oc get subvolumes.storage.ibmcloud.io \
+        -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null)" ] && break
+    sleep 5
 done
-oc delete subvolumes.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} --ignore-not-found
 
 # 6. Delete pool-owned PVs
 oc get pv -o json | jq -r "

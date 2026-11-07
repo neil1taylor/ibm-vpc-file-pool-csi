@@ -58,24 +58,13 @@ oc delete volumesnapshot --all -n ${TUTORIAL_NS} --timeout=60s --ignore-not-foun
 # 3. Delete PVCs
 oc delete pvc --all -n ${TUTORIAL_NS} --timeout=60s --ignore-not-found
 
-# 4. Grace period for CSI to cascade SubVolume deletes
-sleep 5
-
-# 5. Force-clean orphan SubVolumes (if CSI cascade didn't finish)
-for sv in $(oc get subvolumes.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null); do
-    oc patch "$sv" --type=merge -p '{"metadata":{"finalizers":null}}'
+# 4. Wait for the driver to delete the SubVolumes and Snapshots (about 35
+#    seconds in a lab run). Do not delete them by hand while this runs.
+for i in $(seq 1 30); do
+    [ -z "$(oc get subvolumes.storage.ibmcloud.io,snapshots.storage.ibmcloud.io \
+        -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null)" ] && break
+    sleep 5
 done
-oc delete subvolumes.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} --ignore-not-found
-
-# 6. Force-clean orphan Snapshots
-for snap in $(oc get snapshots.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null); do
-    oc patch "$snap" --type=merge -p '{"metadata":{"finalizers":null}}'
-done
-oc delete snapshots.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} --ignore-not-found
 
 # 7. Delete pool (force-remove finalizer if stuck)
 oc delete filesharepool ${POOL_NAME} --timeout=60s --ignore-not-found || {
@@ -218,9 +207,9 @@ Expected output (checksums will differ):
 
 ```
 Total files written:
--rw-r--r--    1 99       99              25 ... config.txt
+-rw-r--r--    1 99       99              24 ... config.txt
 -rw-r--r--    1 99       99              27 ... db-dump.txt
--rw-r--r--    1 99       99              22 ... uploads.txt
+-rw-r--r--    1 99       99              21 ... uploads.txt
 -rw-r--r--    1 99       99         5242880 ... binary-blob.bin
 Checksums:
 a1b2c3d4...  /data/config.txt
@@ -271,7 +260,7 @@ EOF
 **What this does:**
 - Creates a VolumeSnapshot named `test-data-snap` targeting the `test-data` PVC
 - The `ibm-vpc-file-pool` VolumeSnapshotClass tells the CSI external-snapshotter sidecar to call the pool driver's `CreateSnapshot` RPC
-- A Kubernetes Job in the driver's namespace copies the SubVolume's directory into a snapshot path (e.g., `/pvcs/.snapshots/snap-xxx`) on the same VPC file share. The copy is not instant
+- A Kubernetes Job in the driver's namespace copies the SubVolume's directory into a snapshot path (e.g., `/pvcs/.snapshots/snap-snapshot-xxx`) on the same VPC file share. The copy is not instant (36 seconds for this small volume in a lab run)
 - The driver creates a `Snapshot` CR (kind: Snapshot, apiVersion: storage.ibmcloud.io/v1alpha1) that tracks the snapshot on disk
 
 > **Consistency:** A snapshot of a volume that a pod is writing to is not one point in time, because files can change while the copy runs. Here no pod uses the volume, so the copy is consistent. For a disk of a running VM, the snapshot is a QEMU copy (or an instant snapshot where the KubeVirt `Sidecar` feature gate is on). See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md#snapshots-and-clones) and [VM-INSTANT-SNAPSHOTS.md](VM-INSTANT-SNAPSHOTS.md).
@@ -299,13 +288,13 @@ Expected output:
 
 ```
 NAME                    POOL         SOURCE                   SIZE   PHASE   READY
-snap-xxxxxxxx-...       snap-pool    pvc-xxxxxxxx-...         10     Ready   true
+snapshot-xxxxxxxx-...   snap-pool    pvc-xxxxxxxx-...         10     Ready   true
 ```
 
 **What the Snapshot CR contains:**
 - `spec.poolName` -- references the `snap-pool`
 - `spec.sourceSubVolume` -- the SubVolume name (not the PVC name)
-- `spec.snapshotPath` -- the directory where snapshot data lives (e.g., `/pvcs/.snapshots/snap-xxx`)
+- `spec.snapshotPath` -- the directory where snapshot data lives (e.g., `/pvcs/.snapshots/snap-snapshot-xxx`)
 - `spec.sourceSubPath` -- the original SubVolume path (e.g., `/pvcs/pvc-xxx`)
 - `status.phase: Ready` -- snapshot copy is complete
 - `status.readyToUse: true` -- safe to restore from
@@ -353,7 +342,7 @@ Wait for the PVC to bind:
 
 ```bash
 oc get pvc restored-data -n ${TUTORIAL_NS} -w
-# The PVC binds at once. The restore copy runs behind it, and a pod cannot mount it until the copy has finished
+# The PVC can stay Pending for about 15 seconds (one retry with "operation in progress"), then it binds. A pod cannot mount it until the copy has finished
 ```
 
 Mount the restored PVC in a reader pod and verify the data:
@@ -768,15 +757,13 @@ While the clone is in progress, check the `cloneProgress` field for byte-level t
 oc get subvolume ${SV_CLONE} -o json | jq '.status.cloneProgress'
 ```
 
-Expected output during copy:
+`totalBytes` is the size of the PVC (15 GiB here), not the size of the data in it. `bytesCopied` stays 0 while the copy runs and jumps to `totalBytes` at the end. Expected output during copy:
 
 ```json
 {
-  "bytesCopied": 26214400,
-  "totalBytes": 52428800,
-  "startedAt": "2026-02-25T10:30:00Z",
-  "completedAt": null,
-  "error": ""
+  "bytesCopied": 0,
+  "startedAt": "2026-11-07T13:21:52Z",
+  "totalBytes": 16106127360
 }
 ```
 
@@ -784,11 +771,10 @@ And after completion:
 
 ```json
 {
-  "bytesCopied": 52428800,
-  "totalBytes": 52428800,
-  "startedAt": "2026-02-25T10:30:00Z",
-  "completedAt": "2026-02-25T10:30:45Z",
-  "error": ""
+  "bytesCopied": 16106127360,
+  "completedAt": "2026-11-07T13:22:12Z",
+  "startedAt": "2026-11-07T13:21:52Z",
+  "totalBytes": 16106127360
 }
 ```
 
@@ -908,24 +894,13 @@ oc delete volumesnapshot --all -n ${TUTORIAL_NS} --timeout=60s
 # 3. Delete PVCs (CSI cascades SubVolume deletes)
 oc delete pvc --all -n ${TUTORIAL_NS} --timeout=60s
 
-# 4. Grace period for CSI to cascade SubVolume and Snapshot deletes
-sleep 5
-
-# 5. Force-clean orphan Snapshots
-for snap in $(oc get snapshots.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null); do
-    oc patch "$snap" --type=merge -p '{"metadata":{"finalizers":null}}'
+# 4. Wait for the driver to delete the SubVolumes and Snapshots (about 35
+#    seconds in a lab run). Do not delete them by hand while this runs.
+for i in $(seq 1 30); do
+    [ -z "$(oc get subvolumes.storage.ibmcloud.io,snapshots.storage.ibmcloud.io \
+        -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null)" ] && break
+    sleep 5
 done
-oc delete snapshots.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} --ignore-not-found
-
-# 6. Force-clean orphan SubVolumes
-for sv in $(oc get subvolumes.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null); do
-    oc patch "$sv" --type=merge -p '{"metadata":{"finalizers":null}}'
-done
-oc delete subvolumes.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} --ignore-not-found
 
 # 7. Delete pool-owned PVs
 oc get pv -o json | jq -r "

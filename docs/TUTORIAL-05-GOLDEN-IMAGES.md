@@ -19,7 +19,7 @@ Verify the CSI driver is running:
 # Controller pod (6/6 Running)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=controller
 
-# Node pods (3/3 Running on each schedulable node)
+# Node pods (2/2 Running on each schedulable node)
 oc get pods -n kube-system -l app.kubernetes.io/name=ibm-vpc-file-pool-csi,app.kubernetes.io/component=node
 
 # CSI Driver registered
@@ -35,6 +35,8 @@ oc get csv -n openshift-cnv | grep kubevirt
 # CDI DataImportCrons (golden image sources)
 oc get dataimportcrons -n openshift-virtualization-os-images
 ```
+
+On a ROVS cluster the DataImportCrons use the `snapshot` format, and `openshift-virtualization-os-images` holds no DataVolumes. Mode 1 below assumes DataVolumes, so it may show nothing on such a cluster.
 
 CDI DataImportCrons are the source of truth for golden images. They define which OS images are available (CentOS, Fedora, RHEL, etc.) and their container registry URLs. The syncer discovers images from these resources.
 
@@ -101,6 +103,8 @@ oc get sc ${POOL_NAME}
 ---
 
 ## Mode 1: CDI Native
+
+> **Warning: do not run Mode 1 on a shared cluster.** Step 1b changes the cluster default StorageClass. Every PVC without a `storageClassName` then lands on the pool. Step 1c deletes all DataVolumes in the shared namespace `openshift-virtualization-os-images`. Run it only on a cluster that you own alone. It was not re-run in the 7 November 2026 lab run.
 
 In CDI native mode, you make the pool's StorageClass the cluster default. CDI's DataImportCrons then automatically provision golden image PVCs using the pool StorageClass instead of the previous default. This is the simplest approach -- no pool-level golden image configuration needed.
 
@@ -340,7 +344,7 @@ EOF
 
 > **Note:** The syncer skips processing if the pool StorageClass is already the cluster default (CDI native mode handles it). Make sure you restored the original default in Step 1f before proceeding.
 
-The syncer starts its first cycle 30 seconds after the controller starts, then runs every `refreshInterval`. Since we just updated the pool spec, the reconciler triggers a sync within one reconcile interval (~30 seconds).
+The syncer starts its first cycle 30 seconds after the controller starts, then runs every `goldenImageSyncer.interval` of the driver (5 minutes by default). In a lab run the first DataVolumes appeared about 5 minutes after the pool update, not after 30 seconds.
 
 ### Step 2b: Watch the DataVolumes
 
@@ -364,7 +368,7 @@ NAME                               PHASE       PROGRESS   RESTARTS   AGE
 golden-centos-stream9-image-cron   Succeeded   100.0%                1m
 ```
 
-On rovslab, a CentOS Stream 9 import took from 40 seconds to 5 minutes. The progress can stay near 99% for a few minutes while CDI finishes the image.
+On rovslab, a CentOS Stream 9 import took from 40 seconds to about 10 minutes (9 to 10 minutes in the 7 November 2026 run, with two imports at once). The progress can stay near 99% for several minutes while CDI finishes the image.
 
 `imageFilter: [centos]` is a substring match, so it also picks up `centos-stream10-image-cron`. You get two DataVolumes, PVCs and Templates (`centos-stream9-nfs-pool` and `centos-stream10-nfs-pool`). Use `centos-stream9` as the filter to get only one.
 
@@ -398,8 +402,8 @@ oc get templates -n ${TUTORIAL_NS} -l pool.storage.ibmcloud.io/golden-image=true
 Expected:
 
 ```
-NAME                        DESCRIPTION                                                              PARAMETERS   OBJECTS
-centos-stream9-nfs-pool     CentOS Stream9 VM with boot disk on IBM VPC NFS pool storage...          4            3
+NAME                        DESCRIPTION                                                              PARAMETERS        OBJECTS
+centos-stream9-nfs-pool     CentOS Stream9 VM with boot disk on IBM VPC NFS pool storage (golden-pool)....   4 (2 generated)   3
 ```
 
 Inspect the template parameters:
@@ -437,7 +441,7 @@ Watch the VM start:
 oc get vm golden-syncer-vm -n ${TUTORIAL_NS} -w
 ```
 
-The boot PVC clone is a subdirectory copy within the same NFS share, so it completes in seconds:
+The boot PVC clone is a copy within the same NFS share. A Job copies the whole 15 GiB image, not only the 1.8 GiB of data. On a pool with 100 IOPS this took 44 minutes in a lab run, and the VM stayed `Starting` until the copy ended (the pod waits on the clone). `oc process` also prints a `spec.running is deprecated` warning, which you can ignore. To make the clone faster, use a pool with higher IOPS, for example 1000 or more (see the tier example in [Part 4](TUTORIAL-04-POOL-CONFIGURATION.md)). Watch the copy with `oc get subvolumes -l storage.ibmcloud.io/pool=${POOL_NAME}`. The boot PVC shows `Cloning` until it is `Bound`:
 
 ```bash
 oc get pvc -n ${TUTORIAL_NS} | grep golden-syncer-vm
@@ -475,13 +479,13 @@ Expected:
 ```yaml
   goldenImages:
   - name: centos-stream9-image-cron
-    sourceURL: docker://quay.io/containerdisks/centos-stream9:latest
+    sourceURL: docker://quay.io/containerdisks/centos-stream:9
     namespaces:
     - namespace: pool-tutorial-golden
       phase: Ready
       pvcName: golden-centos-stream9-image-cron
       templateName: centos-stream9-nfs-pool
-      dataSourceName: centos-stream9-image-cron-pool-tutorial-golden-nfs-pool
+      dataSourceName: centos-stream9-pool-tutorial-golden-nfs-pool
       lastSyncTime: "2026-02-25T..."
       message: Golden image ready
 ```
@@ -530,13 +534,13 @@ Expected:
 
 ```
 NAME                                                              AGE
-centos-stream9-image-cron-pool-tutorial-golden-nfs-pool           10m
+centos-stream9-pool-tutorial-golden-nfs-pool                      10m
 ```
 
 The DataSource points cross-namespace to the golden PVC in the target namespace:
 
 ```bash
-oc get datasource centos-stream9-image-cron-pool-tutorial-golden-nfs-pool -n openshift-virtualization-os-images -o yaml
+oc get datasource centos-stream9-pool-tutorial-golden-nfs-pool -n openshift-virtualization-os-images -o yaml
 ```
 
 ---
@@ -564,19 +568,18 @@ oc delete pvc --all -n ${TUTORIAL_NS} --timeout=60s --ignore-not-found
 oc delete templates -n ${TUTORIAL_NS} -l pool.storage.ibmcloud.io/golden-image=true --ignore-not-found
 
 # 5. Delete syncer-created DataSources
+# Select by the pool label as well. The golden-image label alone matches the
+# DataSources of every pool on the cluster.
 oc delete datasources -n openshift-virtualization-os-images \
-    -l pool.storage.ibmcloud.io/golden-image=true --ignore-not-found
+    -l pool.storage.ibmcloud.io/golden-image=true,pool.storage.ibmcloud.io/pool=${POOL_NAME} --ignore-not-found
 
-# 6. Grace period for CSI to cascade SubVolume deletes
-sleep 5
-
-# 7. Force-clean orphan SubVolumes
-for sv in $(oc get subvolumes.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null); do
-    oc patch "$sv" --type=merge -p '{"metadata":{"finalizers":null}}'
+# 6-7. Wait for the driver to delete the SubVolumes (about 35 seconds in a lab
+#      run). Do not delete SubVolumes by hand while this runs.
+for i in $(seq 1 30); do
+    [ -z "$(oc get subvolumes.storage.ibmcloud.io \
+        -l storage.ibmcloud.io/pool=${POOL_NAME} -o name 2>/dev/null)" ] && break
+    sleep 5
 done
-oc delete subvolumes.storage.ibmcloud.io \
-    -l storage.ibmcloud.io/pool=${POOL_NAME} --ignore-not-found
 
 # 8. Delete pool-owned PVs
 oc get pv -o json | jq -r "
