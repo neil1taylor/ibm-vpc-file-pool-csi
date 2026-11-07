@@ -231,6 +231,8 @@ status:
 
 To plan an earlier restore point, add `rewindTo: "2026-11-05T08:17:15Z"` to the spec. The plan then says `rewind: true` for each disk and `rpo: 17m4s`.
 
+The status of a Failover may also show the old fields `moment` and `moments` next to `restorePoint` and `restorePoints`. They hold the same values. They are kept for one release and will go, so use `restorePoint` and `restorePoints`.
+
 To run the failover, make the namespace of the VM on the DR cluster, then apply an Execute with the same `basePath` and `rewindTo` and with the pool:
 
 ```bash
@@ -264,9 +266,9 @@ Skip this step if the plan says `in place` for every disk and you want the newes
 failover execute --nfs-mount-path ${FAILOVER_PATH} --prepare-only --rewind-to ${RESTORE_POINT}
 ```
 
-`--prepare-only` rolls back unfinished copies and rewinds the disks, then stops. It needs no cluster and no pool name. Each rewound disk goes into a new folder next to the original, named `<volume>.rewind-<epoch>`. The latest disk is not changed. A rewind copies the whole disk, so it can take minutes (about 6 minutes for a 20 GiB and a 2 GiB disk in the lab).
+`--prepare-only` rolls back unfinished copies and rewinds the disks, then stops. It needs no cluster and no pool name. Each rewound disk goes into a new folder next to the original, named `<volume>.rewind-<epoch>`. The latest disk is not changed. A rewind copies the whole disk, so it can take minutes (about 6 minutes for a 20 GiB and a 2 GiB disk in the lab, and about 2.5 minutes for a 12 GiB and a 3 GiB disk).
 
-**Expected:** the plan, then one line for each rewound disk. The tool prints `Warning: skipping ...rewind-...: metadata file not found` for these folders in later commands. This is harmless.
+**Expected:** the line `Preparing running VM disks ...`, then one line for each rewound disk. The tool does not print the plan again. The tool prints `Warning: skipping ...rewind-...: metadata file not found` for these folders in later commands. This is harmless.
 
 ```
 Preparing running VM disks (rolling back unfinished copies, rewinding where needed)...
@@ -301,7 +303,7 @@ failover execute --nfs-mount-path ${FAILOVER_PATH} \
 failover status
 ```
 
-**Expected:** `Created SubVolume`, `Created PV` and `Created PVC` for each volume (the dry run shows three lines for each volume and makes nothing). The PV path ends in `.../repl/pvcs/pvc-<uuid>`. The status table shows each PVC as `Bound` after a few seconds. The PVs have the prefix `dr-`. The PVCs keep the namespace and name they had on the source cluster. Running `execute` again skips what exists.
+**Expected:** `Created SubVolume`, `Created PV` and `Created PVC` for each volume (the dry run shows three lines for each volume and makes nothing). The PV path ends in `.../repl/pvcs/pvc-<uuid>`. The status table shows each PVC as `Bound` within about two minutes. Right after `execute`, one PVC can still be `Pending`. The PVs have the prefix `dr-`. The PVCs keep the namespace and name they had on the source cluster. Running `execute` again prints `already exists, skipping` for what exists.
 
 ```
 [dry-run] Would create SubVolume pvc-7361d4f2-3a72-4eb3-911e-1afe41ce8708
@@ -321,7 +323,7 @@ The PVs carry the pool's NFS mount options, including `sec=sys`, and the PVCs na
 
 ### An earlier restore point (after Step 4)
 
-Add `--rewind-to ${RESTORE_POINT}`. A dry run shows the rewound folder (`...pvc-<uuid>.rewind-<epoch>`) in each PV path and checks it the same way as a real run:
+Add `--rewind-to ${RESTORE_POINT}`. After Step 4, the real run takes under a second: it reuses the rewound folders and does not rewind again. It prints the `Preparing running VM disks` line and the rewound disks, then the `Created ...` lines. A dry run shows the rewound folder (`...pvc-<uuid>.rewind-<epoch>`) in each PV path and checks it the same way as a real run:
 
 ```bash
 failover execute --nfs-mount-path ${FAILOVER_PATH} \
@@ -347,9 +349,9 @@ virtctl start my-vm -n vms --kubeconfig ${DR_KUBECONFIG}
 dr get vmi -n vms -w
 ```
 
-**Expected:** `VM my-vm was scheduled to start`. In the lab the VM was `Running` with the guest agent connected 17 seconds later. The guest agent connects. The kernel log shows no file-system errors if the copy was `FileSystemConsistent`.
+**Expected:** `VM my-vm was scheduled to start`. In the lab the VM was `Running` with the guest agent connected between 17 and 65 seconds later. The guest agent connects. The kernel log shows no file-system errors if the copy was `FileSystemConsistent`.
 
-Check your data. For a VM that logs files, count the files and compare their checksums to the log. In a lab test with a VM that wrote a file and logged its checksum every 2 seconds, a VM started from the rewound disk had exactly the files up to the chosen restore point (and not the file written later), and a VM started from the newest restore point had all the files up to the last copy. All checksums matched. Both VMs started in under a minute. In a second lab test, the VM started from the newest restore point had the 50 MB file `/var/tmp/big` that was written before the last copy and the kernel log held no file-system errors.
+Check your data. For a VM that logs files, count the files and compare their checksums to the log. In a lab test with a VM that wrote a file and logged its checksum every 2 seconds, a VM started from the rewound disk had exactly the files up to the chosen restore point (and not the file written later), and a VM started from the newest restore point had all the files up to the last copy. All checksums matched. In one run the rewound disk held 307 log entries, the same as the source had up to that restore point; the file written after it was missing, and the VM then wrote 138 new entries. In a second lab test, the VM started from the newest restore point had the 50 MB file `/var/tmp/big` that was written before the last copy and the kernel log held no file-system errors.
 
 > **After the VM runs, the disk no longer fits its restore points.** `failover execute --prepare-only --rewind-to ...` and `failover execute --rewind-to ...` now refuse with `Error: pvc-... has changed since its last copy (a VM has probably run on it), so its restore points no longer fit it and it cannot be rewound`. To try another restore point, fail over again from copies that no VM has used.
 
