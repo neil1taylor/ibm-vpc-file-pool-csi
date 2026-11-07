@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.19.3 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.19.4 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -125,9 +125,9 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 
 ## Version-Specific Upgrade Notes
 
-### Upgrading to v0.19.3 (from v0.17.x, v0.18.0, v0.19.0, v0.19.1 or v0.19.2)
+### Upgrading to v0.19.4 (from v0.17.x, v0.18.0, v0.19.0, v0.19.1, v0.19.2 or v0.19.3)
 
-**v0.18.0, v0.19.0, v0.19.1 and v0.19.2 were never deployed anywhere. Upgrade from v0.17.x straight to v0.19.3.** The v0.18.0, v0.19.0, v0.19.1 and v0.19.2 notes apply in full. Apply the CRDs first.
+**v0.18.0 and v0.19.0 to v0.19.3 were never deployed to production. Upgrade from v0.17.x straight to v0.19.4.** The v0.18.0, v0.19.0, v0.19.1, v0.19.2 and v0.19.3 notes apply in full. Apply the CRDs first.
 
 **Changes:**
 - An older restore point of a VM disk in COS is read from the export's restore point folder (a VM that was stopped when backed up) or from its undo files (a running VM). v0.19.1 could read only undo files.
@@ -139,7 +139,7 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 
 **Chart changes:** nothing new to configure.
 
-**Action required:** nothing new. Set `image.tag` and `consolePlugin.image.tag` to `v0.19.3` if you pin them, and move any pinned Job image to `v0.19.3` too.
+**Action required:** nothing new. Set `image.tag` and `consolePlugin.image.tag` to `v0.19.4` if you pin them, and move any pinned Job image to `v0.19.4` too.
 
 To go back, run `helm rollback`.
 

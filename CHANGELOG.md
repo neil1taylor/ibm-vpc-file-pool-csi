@@ -19,6 +19,10 @@ To make a release:
 
 ## [Unreleased]
 
+## [v0.19.4] — 2026-11-07
+
+v0.19.0 to v0.19.3 were never deployed to a production cluster; v0.19.4 is the first release since v0.17.2 to deploy. Fixed: when the replication policy of a backup was changed by another writer at the moment a copy cycle ended, the final status write was lost. A volume then stayed marked as copying, and its export to COS waited until the next cycle. The status write now lands on the newest version of the policy.
+
 ## [v0.19.3] — 2026-11-06
 
 v0.19.0 to v0.19.2 were never deployed, so v0.19.3 is the first release since v0.17.2 to deploy. Fixed: the COS disk server mounts two snapshots of an export, and the second mount took the port of the first, so the list of restore point folders read the wrong snapshot and an older restore point of a VM disk in COS was not listed.
