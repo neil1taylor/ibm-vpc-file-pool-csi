@@ -140,7 +140,7 @@ The new claim pool-tutorial-backup/files-back holds the files.
 2 files, 1 folders, 0 links, 12 bytes
 ```
 
-It took about 70 seconds. The tree is kept, so the files are at `/keep` and `/a/1` in the new PVC. The name of the restore (`bfr-...`) is yours to note. The next restore you start replaces it with the same name, so `kubectl backup restore-files --status NAME` shows the latest restore of this user until the next one replaces it.
+It took about 70 seconds. The tree is kept, so the files are at `/keep` and `/a/1` in the new PVC. The name of the restore (`bfr-...`) is yours to note. Each restore keeps its own name, also when you start another one, and `kubectl backup restore-files --status NAME` shows it until the driver deletes the ended restore, 24 hours after it ended.
 
 Read them with a pod:
 
