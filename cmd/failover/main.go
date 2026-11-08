@@ -176,6 +176,31 @@ func buildClient(kubeconfig string) (client.Client, error) {
 	return c, nil
 }
 
+// executeLine is the command the plan prints for the run that follows it. It
+// carries over what the plan was given and names every flag the run needs;
+// --dr-export-path is always there, because a share that receives replicas has
+// its data in a folder below the share root.
+func executeLine(flags map[string]string) string {
+	exportPath := flags["dr-export-path"]
+	if exportPath == "" {
+		exportPath = "<EXPORT_PATH>"
+	}
+	line := fmt.Sprintf("kubectl failover execute --nfs-mount-path %s --dr-pool <POOL> --dr-share-ip <IP> --dr-export-path %s",
+		flags["nfs-mount-path"], exportPath)
+	for _, name := range []string{"rewind-to", "vms"} {
+		if v := flags[name]; v != "" {
+			line += " --" + name + " " + v
+		}
+	}
+	if flags["force"] == "true" {
+		line += " --force"
+	}
+	if v := flags["namespace"]; v != "" {
+		line += " --namespace " + v
+	}
+	return line
+}
+
 func runPlan(args []string) error {
 	flags, err := parseRenamedFlags(args)
 	if err != nil {
@@ -219,7 +244,7 @@ func runPlan(args []string) error {
 	printVMPlan(os.Stdout, plan)
 
 	fmt.Printf("\nTo execute failover, run:\n")
-	fmt.Printf("  kubectl failover execute --nfs-mount-path %s --dr-pool <POOL> --dr-share-ip <IP>\n", nfsMountPath)
+	fmt.Printf("  %s\n", executeLine(flags))
 
 	return nil
 }
