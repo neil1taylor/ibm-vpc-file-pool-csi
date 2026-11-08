@@ -305,12 +305,11 @@ Every 60 seconds, or on a FileSharePool CR change:
    - Otherwise: emit a Warning event ("pool at capacity").
 5. It updates `FileSharePool.Status` with the current metrics.
 6. It emits Prometheus metrics:
-   - `pool_total_capacity_gb`
-   - `pool_allocated_capacity_gb`
-   - `pool_pvc_count`
-   - `pool_share_count`
-   - `share_allocated_capacity_gb` (per share)
-   - `share_pvc_count` (per share)
+   - `vpc_file_pool_allocated_gb`
+   - `vpc_file_pool_pvc_count`
+   - `vpc_file_pool_share_count`
+   - `vpc_file_pool_share_total_gb` (per share)
+   - `vpc_file_pool_share_allocated_gb` (per share)
 
 ## Data Flow: CreateSnapshot
 

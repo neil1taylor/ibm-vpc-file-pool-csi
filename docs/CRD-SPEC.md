@@ -330,6 +330,10 @@ type GoldenImageNamespaceStatus struct {
     // LastSyncTime is when this image was last synced.
     // +optional
     LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
+
+    // Message is a human-readable status message.
+    // +optional
+    Message string `json:"message,omitempty"`
 }
 
 // ShareDrainStatus tracks the draining progress for a single share.
@@ -1612,8 +1616,8 @@ type PoolBenchStatus struct {
     Steps          []PoolBenchStepResult  // one per step: vms, share, guest and IBM IOPS, share latency, p50/p95/p99, throughput, slow %, burst slow %, stalls, at limit, time to ready, pass, cutShort
     KneeVMs        int32                  // the first failed step; 0: no knee
     RecommendedVMs int32                  // 80% of the knee, down to a step; or the largest passed step
-    Events         []PoolBenchEventResult // a backup event also has copySpeedAvgMBps and copySpeedMaxMBps (running-VM copies), p95Micros and p95BeforeMicros (the VMs' latency during the event and in the step before)
-    Log            []PoolBenchLogEntry    // the newest entries: Info, Warning, Error, Control
+    Events         []PoolBenchEventResult // each event has type, atVMs, started, ended, seconds and message; a backup event also has copySpeedAvgMBps and copySpeedMaxMBps (running-VM copies; copySpeedSumMBps and copySpeedSamples hold the running sum and count of the readings while the event runs, and the average is set when it ends), p95Micros and p95BeforeMicros (the VMs' latency during the event and in the step before)
+    Log            []PoolBenchLogEntry    // the newest entries; each has time, kind (Info, Warning, Error or Control) and message
     CleanedUp      bool                   // the VMs, pool and namespace are gone and the VPC no longer lists the share
 }
 ```
@@ -1951,6 +1955,11 @@ type VMCopyState struct {
     // StagingFile is the staging file name in the volume's root directory.
     StagingFile string `json:"stagingFile"`
 
+    // SpeedMBps is the speed limit of the copy of each disk now, in megabytes
+    // per second. 0 means no limit. An adaptive copy changes it.
+    // +optional
+    SpeedMBps int32 `json:"speedMBps,omitempty"`
+
     // RestorePoint is the restore point the copy shows.
     // +optional
     RestorePoint metav1.Time `json:"restorePoint,omitempty"`
@@ -1965,6 +1974,34 @@ type VMCopyState struct {
     // FreezeError is the freeze error, if the freeze failed.
     // +optional
     FreezeError string `json:"freezeError,omitempty"`
+
+    // Bitmap is the change list this copy started. Base is the change list it
+    // read, for a change copy; Incremental is true then.
+    Bitmap string `json:"bitmap"`
+    // +optional
+    Base string `json:"base,omitempty"`
+    // +optional
+    Incremental bool `json:"incremental,omitempty"`
+
+    // Leader names the Snapshot that owns the QEMU copy, when this Snapshot
+    // joined a copy that another Snapshot of the same VM started. It is empty
+    // on the owner. Only a snapshot copy sets it.
+    // +optional
+    Leader string `json:"leader,omitempty"`
+
+    // SetDisks lists every disk of the QEMU copy, in the order QEMU numbered
+    // them. Only a snapshot copy sets it, on the owner and on joined Snapshots.
+    // +optional
+    SetDisks []VMCopyDisk `json:"setDisks,omitempty"`
+}
+
+// VMCopyDisk is one disk of a QEMU copy that covers several disks of a VM.
+type VMCopyDisk struct {
+    // Volume is the pod volume name of the disk.
+    Volume string `json:"volume"`
+
+    // StagingFile is the staging file name in the volume's root directory.
+    StagingFile string `json:"stagingFile"`
 }
 ```
 
@@ -2135,7 +2172,7 @@ A Plan fails (it is not an empty `Planned`) if the claim has no `<basePath>/pvcs
 | `startedAt`, `finishedAt` | Bounds of the run |
 | `rpo` | Age of the oldest restore point that will be shown |
 | `vms[]` | Each running VM: `name` (`namespace/name`), `restorePoint` it will show, `restorePoints` (all restore points its disks can show, newest first; the deprecated `moment` and `moments` hold the same values) and `disks[]` (`subVolume`, `rewind`: false is "in place", true copies the whole disk) |
-| `volumes[]` | Every volume that is failed over, with its claim, size, folder (`subPath`, the new folder for a rewound disk), owner and policy |
+| `volumes[]` | Every volume that is failed over: `subVolume`, `pvcName`, `pvcNamespace`, `requestedGB`, folder (`subPath`, the new folder for a rewound disk), `uid`, `gid`, `permissions`, `policy` and `lastSync` (the restore point the volume shows) |
 | `restorePointsTruncated` | The lists of restore points were cut to fit the termination message (newest kept). The deprecated `momentsTruncated` holds the same value |
 | `createdPVCs[]` | The PVCs an Execute made |
 

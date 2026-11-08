@@ -757,11 +757,9 @@ The replication controller exports the following metrics:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `pool_csi_replication_last_sync_timestamp` | Gauge | `policy`, `source_pool` | Unix timestamp of last successful sync |
-| `pool_csi_replication_rpo_seconds` | Gauge | `policy`, `source_pool` | Current RPO in seconds (now - last sync) |
-| `pool_csi_replication_sync_duration_seconds` | Histogram | `policy`, `source_pool` | Duration of replication cycles |
-| `pool_csi_replication_bytes_transferred` | Counter | `policy`, `source_pool`, `subvolume` | Total bytes transferred |
-| `pool_csi_replication_sync_total` | Counter | `policy`, `source_pool`, `result` | Total sync attempts (result=success/failure) |
+| `pool_csi_replication_lag_seconds` | Gauge | `policy`, `source_pool` | Current replication lag in seconds (time since last successful sync) |
+| `pool_csi_replication_sync_duration_seconds` | Histogram | `policy`, `source_pool` | Duration of replication sync cycles |
+| `pool_csi_replication_sync_total` | Counter | `policy`, `source_pool`, `result` | Total replication sync attempts (`result` label) |
 | `pool_csi_replication_subvolume_count` | Gauge | `policy`, `source_pool` | Number of SubVolumes being replicated |
 | `pool_csi_replication_consecutive_failures` | Gauge | `policy`, `source_pool` | Current consecutive failure count |
 
@@ -772,7 +770,7 @@ groups:
   - name: replication
     rules:
       - alert: ReplicationRPOBreach
-        expr: pool_csi_replication_rpo_seconds > 3600
+        expr: pool_csi_replication_lag_seconds > 3600
         for: 5m
         labels:
           severity: warning

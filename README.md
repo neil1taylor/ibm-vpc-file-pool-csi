@@ -93,6 +93,22 @@ The words used here (pool, share, restore point, snapshot pool and others) are d
 
 The project's own words (pool, share, SubVolume, tier, drain, golden image, clone, hook and the rest) are defined once in [CONTEXT.md](docs/CONTEXT.md).
 
+### Abbreviations and Services
+
+| Term | Definition |
+|------|-----------|
+| **ROKS** | Red Hat OpenShift on IBM Cloud, the managed OpenShift service the driver runs on. |
+| **ROVS** | Red Hat OpenShift Virtualization Service on IBM Cloud: a ROKS cluster set up to run VMs with KubeVirt. |
+| **CBR** | Context-based restrictions: IBM Cloud rules that limit which networks may reach a service, such as a COS bucket. A wrong rule makes COS refuse the key. |
+| **RWX** | ReadWriteMany: a PVC access mode that lets many pods on many nodes use one volume. Pool volumes support it. |
+| **RPO** | Recovery point objective: how much recent data you can afford to lose. For replication it is the time since the last good sync. |
+| **RTO** | Recovery time objective: how long a recovery may take before the service is back. |
+| **Undo file** | A file in `.repl-undo` next to a backed-up running VM's `disk.img`. It holds the blocks that changed, so an earlier restore point can be rebuilt from the latest disk. |
+| **libguestfs** | A set of tools that read the file systems inside a VM disk through a small read-only appliance VM. The browse helper uses it to show files in a VM backup without starting the VM. |
+| **Kopia** | The open-source backup program that stores exported backups, encrypted, in a COS bucket. The helper pods run it. |
+| **Key Protect** | The IBM Cloud service that holds the root key that wraps the backup key of a COS export. |
+| **COS** | IBM Cloud Object Storage: the bucket service that receives exported backups. |
+
 ### IBM Cloud VPC
 
 | Term | Definition |

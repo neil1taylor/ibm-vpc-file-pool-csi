@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.19.4 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.19.4 | 1.28+ | 4.14+ | v3.10+ | 1.26+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -140,6 +140,53 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 **Chart changes:** nothing new to configure.
 
 **Action required:** nothing new. Set `image.tag` and `consolePlugin.image.tag` to `v0.19.4` if you pin them, and move any pinned Job image to `v0.19.4` too.
+
+To go back, run `helm rollback`.
+
+### Upgrading to v0.19.3 (from v0.17.x, v0.18.0, v0.19.0, v0.19.1 or v0.19.2)
+
+**v0.18.0 and v0.19.0, v0.19.1 and v0.19.2 were never deployed to production. Upgrade from v0.17.x straight to v0.19.3.** The v0.18.0 and v0.19.0 notes apply in full. Apply the CRDs first.
+
+**Changes:**
+- Fixed: the disk server for a VM disk in COS mounts two snapshots of an export, and the second mount took the port of the first. The list of restore point folders read the wrong snapshot, so an older restore point of a VM disk in COS was not listed.
+
+**CRD changes:** the same as v0.18.0 and v0.19.0. Nothing new.
+
+**Chart changes:** nothing new to configure.
+
+**Action required:** nothing new. Set `image.tag` and `consolePlugin.image.tag` to `v0.19.3` if you pin them, and move any pinned Job image to `v0.19.3` too.
+
+To go back, run `helm rollback`.
+
+### Upgrading to v0.19.2 (from v0.17.x, v0.18.0, v0.19.0 or v0.19.1)
+
+**v0.18.0 and v0.19.0 and v0.19.1 were never deployed to production. Upgrade from v0.17.x straight to v0.19.2.** The v0.18.0 and v0.19.0 notes apply in full. Apply the CRDs first.
+
+**Changes:**
+- An older restore point of a VM disk in COS now also comes from the export's restore point folder. A VM that was stopped when it was backed up keeps a full copy in such a folder; a running VM keeps undo files. The disk server looks first for the newest folder at or before the time asked for, then rebuilds from the undo files, and refuses only if neither reaches back. Before this, the exports of stopped VMs could not be read for an older restore point.
+
+**CRD changes:** the same as v0.18.0 and v0.19.0. Nothing new.
+
+**Chart changes:** nothing new to configure.
+
+**Action required:** nothing new. Set `image.tag` and `consolePlugin.image.tag` to `v0.19.2` if you pin them, and move any pinned Job image to `v0.19.2` too.
+
+To go back, run `helm rollback`.
+
+### Upgrading to v0.19.1 (from v0.17.x, v0.18.0 or v0.19.0)
+
+**v0.18.0 and v0.19.0 were never deployed to production. Upgrade from v0.17.x straight to v0.19.1.** The v0.18.0 and v0.19.0 notes apply in full. Apply the CRDs first.
+
+**Changes:**
+- The reader of undo files in COS refuses a broken or gapped chain of undo files, and accepts only the exact undo file names the writer makes.
+- The reader stops at 2 million records over all layers. A restore point that is too large to browse says so.
+- `kubectl backup` prints the deprecation line for old flag names once.
+
+**CRD changes:** the same as v0.18.0 and v0.19.0. Nothing new.
+
+**Chart changes:** nothing new to configure.
+
+**Action required:** nothing new. Set `image.tag` and `consolePlugin.image.tag` to `v0.19.1` if you pin them, and move any pinned Job image to `v0.19.1` too.
 
 To go back, run `helm rollback`.
 

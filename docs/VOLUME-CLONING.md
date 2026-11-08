@@ -748,13 +748,8 @@ New Prometheus metrics for clone operations:
 
 ```go
 // Clone operation counters
-pool_csi_clones_total{pool, status}           // Total clone operations (success/error)
-pool_csi_clone_duration_seconds{pool}          // Time from the clone worker picking up a clone to the end of its copy Job
-
-// Clone state gauges
-pool_csi_clones_pending{pool}                  // Number of clones in Pending state
-pool_csi_clones_in_progress{pool}              // Number of clones in InProgress state
-pool_csi_clones_failed{pool}                   // Number of clones in Failed state
+vpc_file_pool_clones_total{pool, status}       // Total clone operations
+vpc_file_pool_clone_duration_seconds{pool}     // Time from the clone worker picking up a clone to the end of its copy Job
 ```
 
 ---

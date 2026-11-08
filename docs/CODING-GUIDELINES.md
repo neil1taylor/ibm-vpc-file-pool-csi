@@ -409,52 +409,19 @@ var (
         []string{"operation"},
     )
 
-    // Phase 4 metrics: snapshots
-    snapshotsTotal = prometheus.NewCounterVec(
-        prometheus.CounterOpts{
-            Name: "pool_csi_snapshots_total",
-            Help: "Total snapshot operations",
-        },
-        []string{"pool", "status"},
-    )
-    snapshotDuration = prometheus.NewHistogramVec(
-        prometheus.HistogramOpts{
-            Name:    "pool_csi_snapshot_duration_seconds",
-            Help:    "Time to create a snapshot",
-            Buckets: prometheus.ExponentialBuckets(0.1, 2, 15),
-        },
-        []string{"pool"},
-    )
-
-    // Phase 4 metrics: clones
+    // Phase 4 metrics: clones and group snapshots
     clonesTotal = prometheus.NewCounterVec(
         prometheus.CounterOpts{
-            Name: "pool_csi_clones_total",
-            Help: "Total clone operations",
-        },
-        []string{"pool", "status"},
-    )
-    clonesPending = prometheus.NewGaugeVec(
-        prometheus.GaugeOpts{
-            Name: "pool_csi_clones_pending",
-            Help: "Number of clones in Pending state",
-        },
-        []string{"pool"},
-    )
-
-    // Phase 4 metrics: group snapshots
-    groupSnapshotsTotal = prometheus.NewCounterVec(
-        prometheus.CounterOpts{
-            Name: "pool_csi_group_snapshots_total",
-            Help: "Total group snapshot operations",
+            Name: "vpc_file_pool_clones_total",
+            Help: "Total number of clone operations",
         },
         []string{"pool", "status"},
     )
     groupSnapshotInconsistencyWindow = prometheus.NewHistogramVec(
         prometheus.HistogramOpts{
-            Name:    "pool_csi_group_snapshot_inconsistency_window_seconds",
-            Help:    "Time between first and last copy in group snapshot",
-            Buckets: prometheus.ExponentialBuckets(0.1, 2, 15),
+            Name:    "vpc_file_pool_group_snapshot_inconsistency_window_ms",
+            Help:    "Inconsistency window in milliseconds between first and last copy",
+            Buckets: prometheus.ExponentialBuckets(1, 2, 20), // 1ms to ~524s
         },
         []string{"pool"},
     )
@@ -462,15 +429,15 @@ var (
     // Phase 4 metrics: replication
     replicationRPO = prometheus.NewGaugeVec(
         prometheus.GaugeOpts{
-            Name: "pool_csi_replication_rpo_seconds",
-            Help: "Current RPO in seconds (now - last sync)",
+            Name: "pool_csi_replication_lag_seconds",
+            Help: "Current replication lag in seconds (time since last successful sync)",
         },
         []string{"policy", "source_pool"},
     )
     replicationSyncTotal = prometheus.NewCounterVec(
         prometheus.CounterOpts{
             Name: "pool_csi_replication_sync_total",
-            Help: "Total sync attempts",
+            Help: "Total replication sync attempts",
         },
         []string{"policy", "source_pool", "result"},
     )
