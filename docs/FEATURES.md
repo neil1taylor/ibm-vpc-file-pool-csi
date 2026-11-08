@@ -16,7 +16,9 @@ The driver is purpose-built for IBM Cloud ROKS and ROVS clusters running on VPC 
 |-------|---------|
 | **GA** | Production-ready, fully tested, stable API |
 | **Beta** | Implemented and tested, API may evolve |
-| **Planned** | Code exists but not yet validated in production |
+| **Experimental** | Implemented and lab-tested. Not yet proven over a long time or at scale. Behaviour and API may change |
+| **Not active** | The code is in the repository but switched off. It does nothing on a cluster until it is turned on |
+| **Hidden** | The code is kept for possible later use. The console no longer offers it. It still works when set in YAML |
 
 ---
 
@@ -177,7 +179,7 @@ Thin wrapper around the VPC file share API with operational guardrails.
 Defense-in-depth controls for a storage driver running with host access.
 
 - **Path traversal validation** — All mkdir/rm operations validate paths against `^/pvcs/pvc-[a-f0-9-]{36}$` and reject traversal attempts.
-- **Validating admission webhooks** — Beta — Nine validating webhooks cover the CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, BackupPolicy, BackupRestore, PoolBench, Failover). A mutating webhook adds the VM hook to VMs with instant snapshots.
+- **Validating admission webhooks** — Beta — Ten validating webhooks cover the CRD types (FileSharePool, SubVolume, Snapshot, VolumeGroupSnapshot, ReplicationPolicy, BackupPolicy, BackupRestore, BackupFileRestore, PoolBench, Failover). A mutating webhook adds the VM hook to VMs with instant snapshots.
 - **RBAC minimal permissions** — Controller and node service accounts use least-privilege roles.
 - **No secrets in logs** — API keys and tokens are never logged. Share IDs and mount target IPs are safe to log.
 
@@ -290,7 +292,7 @@ How this driver compares to the two most common alternatives for NFS-based Kuber
 | Automatic pool expansion | ✅ | — | — |
 | Spread / binpack strategies | ✅ | — | — |
 | Proactive expansion | ✅ | — | — |
-| Share consolidation | ✅ | ❌ | — |
+| Binpack strategy and manual share drain | ✅ | ❌ | — |
 | **Resilience** | | | |
 | Idempotent operations | ✅ | ✅ | ✅ |
 | Crash recovery | ✅ (CRD state) | ✅ | ❌ |

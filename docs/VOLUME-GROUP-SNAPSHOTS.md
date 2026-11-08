@@ -850,36 +850,25 @@ The pool manager handles only the data plane (creating/deleting snapshot directo
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `pool_csi_group_snapshots_total` | Counter | pool, status | Group snapshot operations |
-| `pool_csi_group_snapshot_duration_seconds` | Histogram | pool | Total group snapshot duration (including hooks) |
-| `pool_csi_group_snapshot_copy_duration_seconds` | Histogram | pool | Copy phase duration only |
-| `pool_csi_group_snapshot_member_count` | Histogram | pool | Number of members per group snapshot |
-| `pool_csi_group_snapshot_inconsistency_window_seconds` | Histogram | pool | Time between first and last copy |
-| `pool_csi_hook_duration_seconds` | Histogram | pool, hook_name, phase | Per-hook execution time |
-| `pool_csi_hook_failures_total` | Counter | pool, hook_name, phase | Hook failure count |
+| `vpc_file_pool_group_snapshots_total` | Counter | pool, operation, status | Group snapshot operations |
+| `vpc_file_pool_group_snapshot_duration_seconds` | Histogram | pool, operation | Time for group snapshot operations |
+| `vpc_file_pool_group_snapshot_member_count` | Histogram | pool | Number of members per group snapshot |
+| `vpc_file_pool_group_snapshot_inconsistency_window_ms` | Histogram | pool | Time in milliseconds between first and last copy |
+
+There are no hook metrics. Hook outcomes are recorded in `status.hookResults` on the VolumeGroupSnapshot.
 
 ### Alerts
 
 ```yaml
 # Alert: Group snapshot inconsistency window too large
 - alert: GroupSnapshotInconsistencyWindowHigh
-  expr: pool_csi_group_snapshot_inconsistency_window_seconds > 60
+  expr: histogram_quantile(0.95, sum by (le) (rate(vpc_file_pool_group_snapshot_inconsistency_window_ms_bucket[15m]))) > 60000
   for: 0s
   labels:
     severity: warning
   annotations:
     summary: "Group snapshot inconsistency window exceeds 60 seconds"
     description: "Consider using quiesce hooks or reducing SubVolume sizes."
-
-# Alert: Hook failure
-- alert: SnapshotHookFailed
-  expr: rate(pool_csi_hook_failures_total[5m]) > 0
-  for: 0s
-  labels:
-    severity: critical
-  annotations:
-    summary: "Snapshot hook failed"
-    description: "A pre/post snapshot hook failed. Check application state."
 ```
 
 ---

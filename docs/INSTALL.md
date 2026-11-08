@@ -478,7 +478,7 @@ kubectl apply -f config/deploy/node.yaml
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--mode` | (required) | `browse-server`, `build-list` (makes the file list of a VM disk) or `cos-disk-server` (serves a VM disk from COS to the reader) |
+| `--mode` | (required) | `browse-server`, `build-list` (makes the file list of a VM disk), `cos-disk-server` (serves a VM disk from COS to the reader), `restore-files` (runs a file restore Job that reads the file systems inside a VM disk) or `restore-writer` (the writer container of that Job; the only part that can write to the target) |
 | `--root` | (required unless `--cos-source`) | The latest copy of the backup, mounted read-only |
 | `--restore-points` | `""` | The folder of earlier restore points (`20261022T091500Z`, ...). Needed for `--at`. The old name `--moments` still works for one release |
 | `--at` | `""` | Read the newest restore point at or before this time (RFC 3339) instead of the latest copy |
@@ -488,6 +488,12 @@ kubectl apply -f config/deploy/node.yaml
 | `--kopia`, `--kopia-state-dir` | `kopia`, `/tmp/kopia` | The Kopia program and a writable folder for its settings and cache (with `--cos-source`) |
 | `--list-out` | `""` | `build-list`: where to write the file list (`filelist.json.gz`) |
 | `--guest-disk-url`, `--guest-disk-cert-file`, `--guest-disk-token-file` | `""` | `browse-server --guest`: read the VM disk from a disk server (URL, its certificate to trust, the token for it) instead of a mounted backup |
+| `--guest` | `false` | `browse-server`: read the file systems inside the VM disk in `--root` (`disk.img`) through a read-only libguestfs appliance, instead of the files of `--root` |
+| `--guest-socket` | `/tmp/disk.sock` | Private socket where the disk is served to the appliance (`--guest`) |
+| `--guest-appliance` | `""` | Folder with the prebuilt libguestfs appliance (`--guest`). Empty uses the tools' default |
+| `--guest-consistency` | `""` | `FileSystemConsistent` or `CrashConsistent`: how the newest copy of the disk was taken (`--guest`) |
+| `--restore-files-spec`, `--restore-files-paths` | `""` | `restore-files` mode: JSON of the file restore, and the file that lists the paths to restore. Set by the file restore Job |
+| `--restore-writer-spec` | `""` | `restore-writer` mode: JSON of the target and limits of the writer. Set by the file restore Job |
 | `--cache-mb`, `--segment-mb`, `--read-ahead` | `64`, `4`, `8` | `cos-disk-server`: size of the cache, size of one read from COS, and how many segments are read ahead |
 | `--listen` | `:8080` | Address to listen on |
 | `--idle` | `15m` | End the session after this long without use |

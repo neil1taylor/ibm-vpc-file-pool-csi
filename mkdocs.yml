@@ -78,6 +78,9 @@ nav:
       - Tutorial 12 - Replicating Running VMs: TUTORIAL-12-REPLICATING-RUNNING-VMS.md
       - Tutorial 13 - Failover of Running VMs: TUTORIAL-13-FAILOVER-OF-RUNNING-VMS.md
       - Tutorial 14 - Restore a Snapshot in the Console: TUTORIAL-14-CONSOLE-RESTORE.md
+      - Tutorial 15 - Make a VM from the Catalog: TUTORIAL-15-VM-FROM-THE-CATALOG.md
+      - Tutorial 16 - Backups, Clones and Replication Setup in the Console: TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md
+      - Tutorial 17 - Restore Files from a Backup: TUTORIAL-17-RESTORE-FILES-FROM-A-BACKUP.md
       - Deployment Notes: DEPLOYMENT-NOTES.md
       - Features: FEATURES.md
       - Upgrade Guide: UPGRADE-GUIDE.md
@@ -106,6 +109,7 @@ nav:
       - API Key Setup: API-KEY-SETUP.md
   - Design (Phase 4):
       - Volume Cloning: VOLUME-CLONING.md
+      - VM Instant Snapshots: VM-INSTANT-SNAPSHOTS.md
       - Volume Group Snapshots: VOLUME-GROUP-SNAPSHOTS.md
       - Cross-Region DR: CROSS-REGION-DR.md
   - Development:

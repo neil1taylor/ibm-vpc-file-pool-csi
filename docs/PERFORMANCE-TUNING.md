@@ -180,8 +180,8 @@ The pool manager supports two share selection strategies: `spread` and `binpack`
 # Share utilization variance (high variance = uneven, low = evenly spread)
 stddev by (pool) (vpc_file_pool_share_allocated_gb) / avg by (pool) (vpc_file_pool_share_allocated_gb)
 
-# PVC count per share (should be roughly equal for spread)
-vpc_file_pool_share_pvc_count
+# PVC count per pool
+vpc_file_pool_pvc_count
 ```
 
 ---
