@@ -2,7 +2,7 @@
 
 > **Tutorial Series:** [Index](TUTORIAL.md) | [Part 1: Pool Creation](TUTORIAL-01-POOL-CREATION.md) | [Part 2: Snapshots & Clones](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md) | [Part 3: Group Snapshots & Hooks](TUTORIAL-03-GROUP-SNAPSHOTS-AND-HOOKS.md) | [Part 4: Pool Configuration](TUTORIAL-04-POOL-CONFIGURATION.md) | [Part 5: Golden Images](TUTORIAL-05-GOLDEN-IMAGES.md) | [Part 6: Replication & Failover](TUTORIAL-06-REPLICATION-AND-FAILOVER.md) | [Part 7: Monitoring](TUTORIAL-07-MONITORING.md) | [Part 8: Migration & Console](TUTORIAL-08-MIGRATION-AND-CONSOLE.md) | **Part 9**
 
-Make an IBM Cloud Object Storage (COS) bucket that the backup export can use: a locked, versioned bucket, a key that can only write to it, and a network rule that lets only the cluster and your admin addresses reach it. This is the setup that `kubectl backup cos-setup` does for you (see `docs/specs/2026-10-21-backup-cos-export.md`). Follow these steps by hand if you want to see each one. They are what we ran on the lab on 21 October 2026, and each one was checked.
+Make an IBM Cloud Object Storage (COS) bucket that the backup export can use: a locked, versioned bucket, a key that can only write to it, and a network rule that lets only the cluster and your admin addresses reach it. This is the setup that `kubectl backup cos-setup` does for you (see `docs/specs/2026-10-21-backup-cos-export.md`). Follow these steps by hand if you want to see each one. They are what we ran on the lab on 21 October 2026, and each one was checked. On 8 November 2026 (driver v0.19.4) we ran them again on the production lab with a new instance and a new bucket. The result is in "What the lab shows after this setup". No step needed a change except where the page now says so.
 
 > **Note:** `kubectl backup cos-setup` automates these steps (run it with `--dry-run` first; see [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md#export-to-cos-built-proved-in-stage-18-except-the-emergency-key-and-dr-cluster-restores)). It was run against real IBM Cloud in stage 18 of the release test. The command also makes the backup key and wraps it with Key Protect. These manual steps do not. This page stays the tested manual procedure and the reference for what the command makes.
 
@@ -118,7 +118,7 @@ ibmcloud resource service-key-create pool-csi-backup-test-hmac \
 chmod 600 ~/.config/pool-csi/cos-key.json
 ```
 
-IBM Cloud also adds a policy to the service ID by itself when it makes the HMAC key: the Writer role on the **whole** COS instance, not on one bucket. Delete it, or this key can write to every bucket in the instance (`ibmcloud iam service-policies $SID`, then `ibmcloud iam service-policy-delete $SID <policy-id>` for the one with no resource type and no resource). `kubectl backup cos-setup` finds this one policy, which did not exist before the HMAC key, and deletes it; it leaves any other wide policy for you to remove. The secret is shown once, so `cos-setup` writes the key file the restore point the key is made.
+IBM Cloud also adds a policy to the service ID by itself when it makes the HMAC key: the Writer role on the **whole** COS instance, not on one bucket. Delete it, or this key can write to every bucket in the instance (`ibmcloud iam service-policies $SID`, then `ibmcloud iam service-policy-delete $SID <policy-id>` for the one with no resource type and no resource). On 8 November 2026 this policy did not appear, even after a minute: the service ID had only the one bucket policy. Run `ibmcloud iam service-policies $SID` anyway, and delete a wide policy if you see one. `kubectl backup cos-setup` finds this one policy, which did not exist before the HMAC key, and deletes it; it leaves any other wide policy for you to remove. The secret is shown once, so `cos-setup` writes the key file at the moment the key is made.
 
 The access key and secret are in `.credentials.cos_hmac_keys` of that file. Later they go into a Kubernetes Secret in the driver namespace (`spec.export.credentialsSecret`). Never put them in a repository or a log.
 
@@ -179,6 +179,8 @@ ibmcloud cbr rule-create \
   --enforcement-mode enabled
 ```
 
+A new rule takes about a minute to apply. On 8 November 2026 the first call after we made it still worked, and the calls 80 seconds later returned `403`.
+
 Check it from an address that is **not** in the zone. We did this on the lab by pointing the rule at a zone with a made-up address for a minute: the same Kopia/rclone call returned `AccessDenied` at once, and worked again at once when we put the real zone back. A rule is also checked for the **cluster**: the first export Job must still work with the rule on. Run one before you trust the bucket for real backups.
 
 Notes:
@@ -202,6 +204,10 @@ For real backups, give the cluster's VPC a **virtual private endpoint gateway** 
 | Delete the bucket with the key | `403 AccessDenied` |
 | Call from an address not in the CBR zone | `AccessDenied` at once |
 | Call from the admin address in the zone | Worked |
+| Call from a pod in the cluster, direct endpoint (`s3.direct.eu-de...`), 8 Nov 2026 | Listed the Kopia files |
+| Same call from the pod, public endpoint (`s3.eu-de...`) | Listed the Kopia files |
+| Same call from the pod, `s3.private.eu-de...` | Timed out. Use the direct endpoint |
+| Call from a laptop whose address is not in the zone (8 Nov 2026) | `403` after about a minute |
 
 ---
 
@@ -212,6 +218,7 @@ Locked objects cannot be removed before their time ends (25 hours at the shortes
 ```bash
 ibmcloud cbr rule-delete <rule id>
 # delete every object version and delete marker (the driver's key cannot), then the bucket
+# the rule must be gone first, or your laptop is refused too
 ibmcloud cos object-versions --bucket $BUCKET --region eu-de --output json   # lists Versions and DeleteMarkers
 ibmcloud cos object-delete --bucket $BUCKET --key <key> --version-id <id> --region eu-de --force
 ibmcloud cos bucket-delete --bucket $BUCKET --force
