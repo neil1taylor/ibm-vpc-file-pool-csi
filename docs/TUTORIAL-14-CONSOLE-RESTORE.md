@@ -5,7 +5,7 @@
 Make a snapshot of a volume in the OpenShift console, change the volume, and restore the snapshot to a new PVC without writing any YAML. Then check the data in the new PVC. The words snapshot and restore are defined in [CONTEXT.md](CONTEXT.md).
 
 **Time:** about 10 minutes.
-**Status:** this page was run end to end on the DR lab (rovslab-dr-eude, 5 November 2026, driver v0.17.1). The screenshots and the output below are from that run. The screenshots show the namespace `tutc-console` and the StorageClass `tutc-data`, where the steps say `pool-tutorial-console` and `ibm-vpc-file-pool`. Use the names of your own cluster.
+**Status:** this page was run end to end on the DR lab (rovslab-dr-eude, 5 November 2026, driver v0.17.1), and again in the console on the production lab (8 November 2026, driver v0.19.4). The second run changed no step: the restored claim held `before` and not `new-file`. The screenshots and the output below are from the first run. The screenshots show the namespace `tutc-console` and the StorageClass `tutc-data`, where the steps say `pool-tutorial-console` and `ibm-vpc-file-pool`. Use the names of your own cluster.
 **Scope:** this page restores a **snapshot**, which stays on the same share as its volume. The console has a Backups tab for backups. To back up, restore and delete backups in the console, see [Part 16](TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md). To do the same with `kubectl backup`, see [Part 10](TUTORIAL-10-BACKUP-AND-RESTORE.md).
 
 ![A snapshot of a volume stays on the same share, and a restore makes a new PVC from it](images/tutorial-14-console-restore.drawio.svg)

@@ -6,8 +6,8 @@ Make a virtual machine (VM) from the OpenShift Virtualization catalog, with its 
 
 ![CDI copies the catalog image onto the pool as disk.img, and the VM boots from it](images/tutorial-15-vm-from-catalog.drawio.svg)
 
-**Time:** about 15 minutes. On the DR lab (5 November 2026, driver v0.17.1, OpenShift 4.21), the copy of the CentOS Stream 9 image onto a 3000-IOPS share took about 2 minutes for the VM made in the console and about 80 seconds for the VM made with YAML. A share with fewer IOPS is slower: on a 100-IOPS share (24 October 2026) the first copy took about 13 minutes.
-**Status:** Beta. See [FEATURES.md](FEATURES.md) (the CDI copy limit feature). This page was run end to end on the DR lab on 5 November 2026, both in the console and with YAML. The screenshots show the namespace `tutc-vm` and the pool `tutc-data`, where the steps say `pool-tutorial-vm` and `my-pool`. Use the names of your own cluster.
+**Time:** about 15 minutes. On the DR lab (5 November 2026, driver v0.17.1, OpenShift 4.21), the copy of the CentOS Stream 9 image onto a 3000-IOPS share took about 2 minutes for the VM made in the console and about 80 seconds for the VM made with YAML. On the production lab (8 November 2026, driver v0.19.4) both took about 80 seconds. A share with fewer IOPS is slower: on a 100-IOPS share (24 October 2026) the first copy took about 13 minutes.
+**Status:** Beta. See [FEATURES.md](FEATURES.md) (the CDI copy limit feature). This page was run end to end on the DR lab on 5 November 2026 and again on the production lab on 8 November 2026 (driver v0.19.4), both in the console and with YAML. The second run changed no step. The screenshots show the namespace `tutc-vm` and the pool `tutc-data`, where the steps say `pool-tutorial-vm` and `my-pool`. Use the names of your own cluster.
 **Scope:** this page makes a VM from a catalog image. It does not use the pool's golden images, which are hidden. See [FEATURES.md](FEATURES.md).
 
 ---
