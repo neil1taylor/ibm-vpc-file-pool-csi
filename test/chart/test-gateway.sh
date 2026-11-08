@@ -121,6 +121,17 @@ else
     fail "yq is required for the plugin proxy checks"
 fi
 
+# The gateway pod has requests and limits by default (issue #444), and a user can set them.
+if grep -A1 -E '^ +resources:$' "$PLAIN" | grep -qE '^ +null$'; then
+    fail "a pod renders resources: null"
+else
+    pass "no pod renders resources: null"
+fi
+check "the gateway asks for CPU and memory by default" "$PLAIN" 'memory: 64Mi'
+RES="$(mktemp)"; trap 'find "$PLAIN" "$ON" "$OFF" "$OS" "$OWN" "$NOBROWSE" "$RES" -delete' EXIT
+helm template test "$CHART" --namespace kube-system --set backupGateway.resources.limits.memory=777Mi > "$RES"
+check "the gateway takes the resources a user sets" "$RES" 'memory: 777Mi'
+
 # The console reads from the settings ConfigMap whether the file browser exists.
 check "settings: the file browser is on" "$PLAIN" 'fileBrowse: "true"'
 absent "settings: off with the gateway" "$OFF" 'fileBrowse: "true"'

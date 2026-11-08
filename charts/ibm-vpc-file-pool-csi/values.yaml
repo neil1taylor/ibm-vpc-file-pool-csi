@@ -187,6 +187,13 @@ backupGateway:
   maxDownloadBytes: 53687091200
   # File restores one user may have that have not ended. More are refused.
   maxOpenRestores: 10
+  # The gateway streams downloads and keeps no state, so it needs little.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
 poolBench:
   # PoolBench runs storage performance tests with test VMs, started from the
   # console (docs/specs/2026-10-25-poolbench.md). Each run makes its own
@@ -456,6 +463,7 @@ consolePlugin:
     repository: de.icr.io/ibm-vpc-file-pool-csi/console-plugin
     # Empty means "v" plus the chart appVersion (never "latest").
     tag: ""
+    pullPolicy: IfNotPresent
   # The image already runs as user 1001 (nginx).
   securityContext:
     allowPrivilegeEscalation: false

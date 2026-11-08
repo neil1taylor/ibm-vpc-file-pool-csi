@@ -140,7 +140,7 @@ The one door to browse sessions (issue #92). Users talk to it with their own Kub
 | `backupGateway.sessionWait` | string | `20s` | How long a request that asks to wait (`?wait=true`) holds for the helper pod to be ready. Keep it under your proxy's timeout (the chart sets `haproxy.router.openshift.io/timeout: 5m` on the gateway Route; the router default is 30 seconds). `kubectl backup` does not ask to wait: it polls |
 | `backupGateway.maxDownloadBytes` | int | `53687091200` | The largest single file or tar a user may download (50 GiB) |
 | `backupGateway.maxOpenRestores` | int | `10` | File restores one user may have that have not ended. A request over the limit is refused (HTTP 429) |
-| `backupGateway.resources` | object | small | Requests and limits |
+| `backupGateway.resources` | object | requests `50m` CPU and `64Mi` memory; memory limit `256Mi` | Requests and limits of the gateway pod |
 
 When the gateway runs on OpenShift, the chart also adds a `backup-gateway` entry to the ConsolePlugin proxy (user token, the gateway Service on port 8443) and sets `fileBrowse: "true"` in the settings ConfigMap, so the Backups pages show **Browse files**. There is no value for either.
 
@@ -294,6 +294,7 @@ OpenShift Console dynamic plugin for visual pool management. On by default, and 
 | `consolePlugin.enabled` | bool | `true` | Install the OpenShift Console dynamic plugin and turn it on in the console. Set `false` to leave it out |
 | `consolePlugin.image.repository` | string | `de.icr.io/ibm-vpc-file-pool-csi/console-plugin` | Plugin container image repository |
 | `consolePlugin.image.tag` | string | `""` | Plugin image tag. Empty means `v` plus the chart `appVersion` |
+| `consolePlugin.image.pullPolicy` | string | `IfNotPresent` | Pull policy of the plugin image. Empty uses `image.pullPolicy` |
 | `consolePlugin.securityContext` | object | no escalation, `runAsNonRoot`, drop ALL, seccomp `RuntimeDefault` | Container security context of the plugin (its image already runs as user 1001) |
 | `consolePlugin.replicas` | int | `2` | Number of plugin pod replicas |
 | `consolePlugin.port` | int | `9443` | HTTPS port for the plugin Service. TLS certs are auto-provisioned by the OpenShift service-ca operator |
