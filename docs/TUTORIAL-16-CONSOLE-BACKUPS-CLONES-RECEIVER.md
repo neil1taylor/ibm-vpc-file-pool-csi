@@ -242,9 +242,11 @@ keep
 written
 ```
 
-To restore an earlier restore point, repeat Step 5 and choose **At a restore point**. The line under **Volume** shows the oldest and the newest backup. Enter a time in your own time zone. The **Restore point** box stays red until you enter a time, and the **New claim name** box turns red when the claim exists already (`files-restored` does, so choose another name).
+To restore an earlier restore point, repeat Step 5 and choose **At a restore point**. The line under **Volume** shows the oldest and the newest backup. Enter a time in your own time zone. The **Restore point** box stays red until you enter a time (`Choose a time, or restore the latest backup.`). It also turns red for a time before the oldest backup (`This is before the oldest backup (<time>Z). Choose a later time.`). The **New claim name** box turns red when the claim exists already (`A claim with this name already exists in the namespace. A restore never writes over a volume: choose a new name.`), so choose another name.
 
-![At a restore point, with the Restore point box empty and the name already used](images/tutorial-16-restore-at-a-moment.png)
+![At a restore point, with a time before the oldest backup and a name already used](images/tutorial-16-restore-at-a-restore-point.png)
+
+Now choose a time between the oldest and the newest backup, for example the time of the first backup plus two minutes, and a new name such as `files-earlier`. The confirm box names the backup it uses as `at or before <time>Z`. When the restore ends, mount the new claim as in the pod above, and the data is that of the older backup: `/data/a/1` says `first` and the file `extra`, which you added later, is not there.
 
 ---
 
@@ -273,7 +275,7 @@ oc label pvc -n ${NS} files backup-
 ![The row says No longer backed up](images/tutorial-16-no-longer-backed-up.png)
 
 2. Open **Delete backups** on the row again. The console starts a short Job in `kube-system` that only measures the backups. The box says `Measuring the backups on the snapshot pool...`. It took about 20 seconds.
-3. When the measure ends, a red box says `This removes all backups of pool-tutorial-backup/files from policy tut-console, for good`. It shows the two folders, the size and the number of restore points (here `36.0 KiB, 2 restore points`).
+3. When the measure ends, a red box says `This removes all backups of pool-tutorial-backup/files from policy tut-console, for good`. It shows the two folders, the size and the number of restore points (here `36.0 KiB, 2 restore points`; after more backups, `60.0 KiB, 4 restore points`). The box counts the newest backup too, so its number is one more than **Restore Points** on the policy page. One of the two folders is `.moments`, the name that older backups keep on purpose.
 
 ![The box after the measure](images/tutorial-16-delete-confirm.png)
 
@@ -362,7 +364,7 @@ If a VM uses the source claim, the page warns **A VM uses this claim**: the clon
 
 ![The banner with the bar](images/tutorial-16-clone-copying.png)
 
-3. `The cloned volume is ready`, with `The claim files-clone is Bound.` On the DR lab the clone of the 1 GiB volume took about 25 seconds.
+3. `The cloned volume is ready`, with `The claim files-clone is Bound. Use it in a workload from the Add storage page of the workload.` On the DR lab the clone of the 1 GiB volume took about 25 seconds.
 
 ![The last banner](images/tutorial-16-clone-ready.png)
 
