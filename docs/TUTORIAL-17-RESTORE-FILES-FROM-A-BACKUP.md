@@ -268,7 +268,7 @@ The new claim tutf-vms/vm-files holds the files.
 1 files, 2 folders, 0 links, 158 bytes
 ```
 
-The pool of the target claim must set `defaultUID` and `defaultGID` (a pool for VMs uses `107` for both). Without them the restore stays in `Restoring` with the message `the owner of the target claim is not known`. Set them on the pool, delete the stuck restore and the new claim, and start again.
+The pool of the target claim must set `defaultUID` and `defaultGID` (a pool for VMs uses `107` for both). Without them the restore fails at once with a message that names the pool and says to set `defaultUID` and `defaultGID` on the `FileSharePool` (the pool in the Tutorial 10 example sets neither). Set them on the pool, delete the new claim, and start again.
 
 In the new claim the file is at `/sda4/etc/hosts`: the name of the file system is kept at the top.
 
