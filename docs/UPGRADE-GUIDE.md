@@ -45,7 +45,7 @@ Before upgrading, complete every item:
 | v0.11.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.12.0 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
 | v0.13.0–v0.13.2 | 1.28+ | 4.14+ | v3.10+ | 1.25+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional) |
-| v0.14.0–v0.19.4 | 1.28+ | 4.14+ | v3.10+ | 1.26+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
+| v0.14.0–v0.19.5 | 1.28+ | 4.14+ | v3.10+ | 1.26+ | controller-runtime v0.23+, cert-manager v1.12+, CDI (optional), OpenShift Virtualization (for VM features) |
 
 ---
 
@@ -124,6 +124,19 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to v0.19.5 (from v0.19.4)
+
+**Changes:**
+- A restore of files from a VM disk into a new claim fails at once, with a message, when the target pool has no `defaultUID` and `defaultGID`. Before, it waited for ever.
+- A file restore now has a name of its own, so `kubectl backup restore-files --status NAME` works for each restore until the ended restore is deleted. Restores started before the upgrade keep their old names (`bfr-<hash>-<n>`).
+- The failover plan prints a `To execute` line that includes `--dr-export-path`.
+
+**CRD changes:** none. You do not need to apply the CRDs.
+
+**Chart changes:** `backupGateway.resources` now has a default (50m CPU and 64Mi memory requested, 256Mi memory limit), so the gateway pod is no longer without limits. If you set `backupGateway.resources` yourself, your value is used. New value `consolePlugin.image.pullPolicy` (default `IfNotPresent`).
+
+**Action required:** nothing. Set `image.tag` and `consolePlugin.image.tag` to `v0.19.5` if you pin them. To go back, run `helm rollback`.
 
 ### Upgrading to v0.19.4 (from v0.17.x, v0.18.0, v0.19.0, v0.19.1, v0.19.2 or v0.19.3)
 

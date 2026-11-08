@@ -163,7 +163,7 @@ Running VM disks
     pvc-becf191e-0669-45da-b29f-c08d8708ad8b: in place
 
 To execute failover, run:
-  kubectl failover execute --nfs-mount-path /data/repl --dr-pool <POOL> --dr-share-ip <IP>
+  kubectl failover execute --nfs-mount-path /data/repl --dr-pool <POOL> --dr-share-ip <IP> --dr-export-path <EXPORT_PATH>
 ```
 
 `in place` means the disk already shows that restore point, so it is used as it is. The tool refuses with "a copy is still being applied" if a copy is in progress. Wait for it to end, or add `--force`, which rolls the unfinished copy back first.
