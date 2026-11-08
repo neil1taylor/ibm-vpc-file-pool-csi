@@ -7,7 +7,9 @@ import (
 
 	v1alpha1 "github.com/IBM/ibm-vpc-file-pool-csi/api/v1alpha1"
 	"github.com/IBM/ibm-vpc-file-pool-csi/pkg/filerestore"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func newGuestRestoreEnv(t *testing.T) *fileRestoreEnv {
@@ -300,5 +302,35 @@ func TestFileRestoreGuest_ANewClaimWithoutAnOwnerGetsThePoolDefault(t *testing.T
 	// An existing claim keeps what the SubVolume says, or nothing: the writer then reads the owner of the folder.
 	if u, g := e.bc.ownerOfClaim(e.ctx, &v1alpha1.SubVolume{Spec: v1alpha1.SubVolumeSpec{PoolName: "owner-pool"}}, false); u != nil || g != nil {
 		t.Errorf("existing claim: %v:%v, want the folder's owner to be used", u, g)
+	}
+}
+
+func TestFileRestoreGuest_NewClaimInAPoolWithoutAnOwnerFailsAtOnce(t *testing.T) {
+	e := newGuestRestoreEnv(t)
+	e.guestRestore("f1", func(fr *v1alpha1.BackupFileRestore) { fr.Spec.SizeGB = 3 })
+	e.reconcile()
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := e.c.Get(e.ctx, types.NamespacedName{Namespace: "apps", Name: "db-files"}, pvc); err != nil {
+		t.Fatalf("the claim was not made: %v", err)
+	}
+	sv := &v1alpha1.SubVolume{ObjectMeta: metav1.ObjectMeta{Name: "pvc-newclaim"},
+		Spec: v1alpha1.SubVolumeSpec{PoolName: "data-a", PVCNamespace: "apps", PVCName: "db-files", SubPath: "/pvcs/pvc-99999999-8888-7777-6666-555555555555",
+			ShareMountTargetIP: "10.240.1.1", ShareExportPath: "/export_a"}}
+	e.create(sv)
+	pvc.Spec.VolumeName = sv.Name
+	if err := e.c.Update(e.ctx, pvc); err != nil {
+		t.Fatal(err)
+	}
+	pvc.Status.Phase = corev1.ClaimBound
+	if err := e.c.Status().Update(e.ctx, pvc); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile()
+	st := e.fr("f1").Status
+	if st.Phase != restorePhaseFailed || !strings.Contains(st.Message, "defaultUID") || !strings.Contains(st.Message, "defaultGID") || !strings.Contains(st.Message, "data-a") {
+		t.Fatalf("status %+v: the restore must fail at once and name the pool settings", st)
+	}
+	if got := len(e.jobs.callsFor(filerestore.ModeNewClaim)); got != 0 {
+		t.Errorf("%d Jobs started for a restore that cannot run", got)
 	}
 }

@@ -140,7 +140,7 @@ The new claim pool-tutorial-backup/files-back holds the files.
 2 files, 1 folders, 0 links, 12 bytes
 ```
 
-It took about 70 seconds. The tree is kept, so the files are at `/keep` and `/a/1` in the new PVC. The name of the restore (`bfr-...`) is yours to note. The next restore you start replaces it with the same name, so `kubectl backup restore-files --status NAME` shows the latest restore of this user until the next one replaces it.
+It took about 70 seconds. The tree is kept, so the files are at `/keep` and `/a/1` in the new PVC. The name of the restore (`bfr-...`) is yours to note. Each restore keeps its own name, also when you start another one, and `kubectl backup restore-files --status NAME` shows it until the driver deletes the ended restore, 24 hours after it ended.
 
 Read them with a pod:
 
@@ -268,7 +268,7 @@ The new claim tutf-vms/vm-files holds the files.
 1 files, 2 folders, 0 links, 158 bytes
 ```
 
-The pool of the target claim must set `defaultUID` and `defaultGID` (a pool for VMs uses `107` for both). Without them the restore stays in `Restoring` with the message `the owner of the target claim is not known`. Set them on the pool, delete the stuck restore and the new claim, and start again.
+The pool of the target claim must set `defaultUID` and `defaultGID` (a pool for VMs uses `107` for both). Without them the restore fails at once with a message that names the pool and says to set `defaultUID` and `defaultGID` on the `FileSharePool` (the pool in the Tutorial 10 example sets neither). Set them on the pool, delete the new claim, and start again.
 
 In the new claim the file is at `/sda4/etc/hosts`: the name of the file system is kept at the top.
 

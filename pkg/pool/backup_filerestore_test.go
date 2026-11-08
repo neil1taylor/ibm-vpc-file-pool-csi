@@ -642,3 +642,33 @@ func TestFileRestore_DoesNothingWithoutJobs(t *testing.T) {
 		t.Fatalf("status %+v", got.Status)
 	}
 }
+
+func TestFileRestore_AnUnadmittedRestoreIsIgnored(t *testing.T) {
+	e := newFileRestoreEnv(t)
+	e.request("f1", func(fr *v1alpha1.BackupFileRestore) {
+		fr.Annotations = map[string]string{v1alpha1.FileRestoreAwaitingAdmission: "true"}
+		fr.CreationTimestamp = metav1.NewTime(e.now)
+	})
+	e.reconcile()
+	if len(e.jobs.calls) != 0 || e.fr("f1").Status.Phase != "" {
+		t.Fatalf("an unadmitted restore was acted on: calls %d, status %+v", len(e.jobs.calls), e.fr("f1").Status)
+	}
+}
+
+func TestFileRestore_AnUnadmittedRestoreThatIsStuckIsDeleted(t *testing.T) {
+	e := newFileRestoreEnv(t)
+	e.request("f1", func(fr *v1alpha1.BackupFileRestore) {
+		fr.Annotations = map[string]string{v1alpha1.FileRestoreAwaitingAdmission: "true"}
+		fr.CreationTimestamp = metav1.NewTime(e.now)
+	})
+	e.now = e.now.Add(2 * time.Minute)
+	e.reconcile()
+	if err := e.c.Get(e.ctx, types.NamespacedName{Name: "f1"}, &v1alpha1.BackupFileRestore{}); err != nil {
+		t.Fatalf("deleted too soon: %v", err)
+	}
+	e.now = e.now.Add(10 * time.Minute)
+	e.reconcile()
+	if err := e.c.Get(e.ctx, types.NamespacedName{Name: "f1"}, &v1alpha1.BackupFileRestore{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("a stuck unadmitted restore was kept: %v", err)
+	}
+}

@@ -257,3 +257,25 @@ func TestParseRenamedFlags_NewNameNeedsNoWarning(t *testing.T) {
 		t.Fatalf("flags = %v, err = %v", f, err)
 	}
 }
+
+func TestExecuteLine_NamesEveryFlagTheRunNeeds(t *testing.T) {
+	cases := []struct {
+		name  string
+		flags map[string]string
+		want  string
+	}{
+		{"nothing else given", map[string]string{"nfs-mount-path": "/data"},
+			"kubectl failover execute --nfs-mount-path /data --dr-pool <POOL> --dr-share-ip <IP> --dr-export-path <EXPORT_PATH>"},
+		{"export path given", map[string]string{"nfs-mount-path": "/data", "dr-export-path": "/share_x/vm-receive"},
+			"kubectl failover execute --nfs-mount-path /data --dr-pool <POOL> --dr-share-ip <IP> --dr-export-path /share_x/vm-receive"},
+		{"plan flags are carried over", map[string]string{"nfs-mount-path": "/data", "rewind-to": "2026-11-04T18:00:00Z", "vms": "apps/web,apps/db", "force": "true", "namespace": "dr-apps"},
+			"kubectl failover execute --nfs-mount-path /data --dr-pool <POOL> --dr-share-ip <IP> --dr-export-path <EXPORT_PATH> --rewind-to 2026-11-04T18:00:00Z --vms apps/web,apps/db --force --namespace dr-apps"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := executeLine(c.flags); got != c.want {
+				t.Errorf("got  %s\nwant %s", got, c.want)
+			}
+		})
+	}
+}

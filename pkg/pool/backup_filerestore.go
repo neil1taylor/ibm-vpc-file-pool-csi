@@ -188,6 +188,10 @@ func (bc *BackupController) reconcileFileRestores(ctx context.Context) {
 	}
 	for i := range items {
 		fr := &items[i]
+		if _, waiting := fr.Annotations[v1alpha1.FileRestoreAwaitingAdmission]; waiting {
+			bc.tidyUnadmittedFileRestore(ctx, fr)
+			continue
+		}
 		if fileRestoreEnded(fr.Status.Phase) {
 			bc.tidyEndedFileRestore(ctx, fr)
 			continue
@@ -212,6 +216,22 @@ func (bc *BackupController) reconcileFileRestores(ctx context.Context) {
 		if !wasActive && fileRestoreActive(fr.Status.Phase) {
 			running++
 		}
+	}
+}
+
+// unadmittedFileRestoreWait is how long a restore may carry the
+// awaiting-admission mark. The gateway admits or removes it within a moment, so
+// an older one was left by a gateway that stopped.
+const unadmittedFileRestoreWait = 5 * time.Minute
+
+// tidyUnadmittedFileRestore deletes a restore that has waited for admission for
+// too long. Until then the restore is not acted on at all.
+func (bc *BackupController) tidyUnadmittedFileRestore(ctx context.Context, fr *v1alpha1.BackupFileRestore) {
+	if bc.nowFunc().Sub(fr.CreationTimestamp.Time) < unadmittedFileRestoreWait {
+		return
+	}
+	if err := bc.client.Delete(ctx, fr); err != nil && !apierrors.IsNotFound(err) {
+		klog.ErrorS(err, "Failed to delete an unadmitted BackupFileRestore", "restore", fr.Name)
 	}
 }
 
@@ -609,6 +629,13 @@ func (bc *BackupController) fileRestoreIntoNewClaim(ctx context.Context, fr *v1a
 	req.CapacityBytes = size << 30
 	req.UID, req.GID = bc.ownerOfClaim(ctx, sv, true)
 	req.Permissions = sv.Spec.Permissions
+	if fr.Spec.Guest && (req.UID == nil || req.GID == nil) {
+		// Files read from inside a VM disk have no owner a new claim can keep, so
+		// the writer needs one. Waiting would not help: the pool must be changed.
+		bc.failFileRestore(ctx, fr, fmt.Sprintf("the pool %s has no default owner, so the files cannot be given an owner. Set defaultUID and defaultGID on the FileSharePool %s (107 for both on a pool for VMs), then delete the new claim %s/%s and ask again",
+			sv.Spec.PoolName, sv.Spec.PoolName, sp.TargetNamespace, sp.TargetName))
+		return
+	}
 	held := fmt.Sprintf(". The new claim %s/%s is held back; delete it and ask again", sp.TargetNamespace, sp.TargetName)
 	out, done := bc.runFileRestoreJob(ctx, fr, restorePhaseRestoring, "copying the files into the new claim", held, req)
 	if !done {

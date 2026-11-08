@@ -64,4 +64,14 @@ expect_absent "no OpenShift console: no plugin Jobs" "$out" "console-plugin-regi
 expect_absent "no OpenShift console: no plugin Jobs" "$out" "console-plugin-unregister"
 expect_absent "no OpenShift console: no console RBAC" "$out" 'resources: ["consoles"]'
 
+# The pull policy of the plugin image is in the values, and a user can set it (issue #444).
+out=$(render "${OPENSHIFT[@]}" --set consolePlugin.image.pullPolicy=Always)
+dep=$(awk -v RS='\n---\n' '/kind: Deployment/ && /name: test-ibm-vpc-file-pool-csi-console-plugin\n/' <<<"$out")
+expect_contains "console plugin pull policy can be set" "$dep" "imagePullPolicy: Always"
+if grep -qE '^  image:' <(sed -n '/^consolePlugin:/,/^[a-z]/p' "$CHART/values.yaml") && grep -q 'pullPolicy: IfNotPresent' <(sed -n '/^consolePlugin:/,/^[a-zA-Z]/p' "$CHART/values.yaml" | sed -n '/image:/,/securityContext/p'); then
+    pass "values.yaml sets consolePlugin.image.pullPolicy"
+else
+    fail "values.yaml has no consolePlugin.image.pullPolicy"
+fi
+
 exit "$FAILED"

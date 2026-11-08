@@ -281,8 +281,8 @@ func TestRestoreOpenRestoresPerUserAreLimited(t *testing.T) {
 }
 
 // The cap holds when requests arrive at the same time (or at two gateway
-// replicas): a restore takes one of a user's numbered slots, and a slot that is
-// taken cannot be created again.
+// replicas): a restore made over the limit is removed again. At the limit,
+// requests that arrive together may all be refused, but never too many accepted.
 func TestRestoreCapHoldsForParallelRequests(t *testing.T) {
 	e := newRestoreEnv(t)
 	e.g.cfg.MaxOpenRestores = 3
@@ -304,7 +304,7 @@ func TestRestoreCapHoldsForParallelRequests(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	if accepted.Load() != 3 || refused.Load() != 7 || len(e.restores()) != 3 {
+	if accepted.Load() > 3 || accepted.Load()+refused.Load() != 10 || len(e.restores()) != int(accepted.Load()) {
 		t.Fatalf("accepted %d refused %d made %d", accepted.Load(), refused.Load(), len(e.restores()))
 	}
 }
@@ -394,3 +394,78 @@ func TestRestoreCallsNeedAToken(t *testing.T) {
 }
 
 var _ client.Client // the env uses a fake client
+
+// Each restore keeps its own name until it is deleted: a second restore by the
+// same user, also after the first has ended, never replaces it.
+func TestRestoreTwoInARowKeepTheirOwnNames(t *testing.T) {
+	e := newRestoreEnv(t)
+	names := map[string]bool{}
+	for i, target := range []string{"first", "second"} {
+		req := newReq()
+		req["targetName"] = target
+		resp, body := e.do("POST", "/v1/restores", "alice-token", req)
+		if resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("restore %d: %d %s", i, resp.StatusCode, body)
+		}
+		var got Restore
+		if err := json.Unmarshal(body, &got); err != nil || !strings.HasPrefix(got.Name, "bfr-") {
+			t.Fatalf("answer %s: %v", body, err)
+		}
+		names[got.Name] = true
+		// The restore ends before the next one is asked for.
+		for _, fr := range e.restores() {
+			fr.Status.Phase = "Done"
+			if err := e.c.Status().Update(context.Background(), &fr); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(names) != 2 || len(e.restores()) != 2 {
+		t.Fatalf("names %v, %d restores: the second restore replaced the first", names, len(e.restores()))
+	}
+	for n := range names {
+		if resp, body := e.do("GET", "/v1/restores/"+n, "alice-token", nil); resp.StatusCode != 200 {
+			t.Errorf("status of %s: %d %s", n, resp.StatusCode, body)
+		}
+	}
+}
+
+// spyClient records what the gateway creates: a restore must carry the
+// awaiting-admission mark from the moment it exists.
+type spyClient struct {
+	client.Client
+	unmarked atomic.Int32
+}
+
+func (s *spyClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if _, ok := obj.(*v1alpha1.BackupFileRestore); ok && obj.GetAnnotations()[v1alpha1.FileRestoreAwaitingAdmission] == "" {
+		s.unmarked.Add(1)
+	}
+	return s.Client.Create(ctx, obj, opts...)
+}
+
+func TestRestoreOverTheLimitIsNeverRunnableAndNeverAudited(t *testing.T) {
+	e := newRestoreEnv(t)
+	spy := &spyClient{Client: e.g.c}
+	e.g.c = spy
+	e.g.cfg.MaxOpenRestores = 1
+	if resp, body := e.do("POST", "/v1/restores", "alice-token", newReq()); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("first: %d %s", resp.StatusCode, body)
+	}
+	events := len(e.events())
+	req := newReq()
+	req["targetName"] = "second"
+	if resp, body := e.do("POST", "/v1/restores", "alice-token", req); resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("second: %d %s", resp.StatusCode, body)
+	}
+	if spy.unmarked.Load() != 0 {
+		t.Error("a restore was created without the awaiting-admission mark")
+	}
+	if len(e.events()) != events {
+		t.Error("an audit Event was written for a refused request")
+	}
+	rs := e.restores()
+	if len(rs) != 1 || rs[0].Annotations[v1alpha1.FileRestoreAwaitingAdmission] != "" {
+		t.Fatalf("restores %+v: only the admitted one may be left, without the mark", rs)
+	}
+}

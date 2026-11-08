@@ -221,43 +221,54 @@ func (g *Gateway) handleRestoreCreate(w http.ResponseWriter, r *http.Request, u 
 
 var errNoSlot = errors.New("all restore slots of the user are taken")
 
-// createInSlot makes the restore in one of the user's numbered slots. The name
-// of a restore is bfr-<user hash>-<slot>, so the API server refuses a second
-// object in a slot that is taken, however many requests or gateway replicas
-// arrive at once. A slot whose restore has ended is freed and used again.
+// createInSlot makes the restore under a name of its own, bfr-<user hash>-<random>,
+// so a later restore never replaces it; the controller deletes an ended restore
+// after its keep time. The restore is made with the awaiting-admission mark,
+// which the controller ignores. Then the user's open restores are counted
+// (this one and any other not yet admitted included). Within the limit the mark
+// is removed and the restore can run; over it the restore is deleted and refused,
+// so a refused request never becomes runnable. Parallel requests, also at several
+// replicas, never pass the limit; at the limit they may all be refused, and the
+// user asks again. A gateway that stops between the steps leaves a marked restore,
+// which the controller deletes after a few minutes.
 func (g *Gateway) createInSlot(ctx context.Context, u User, spec v1alpha1.BackupFileRestoreSpec) (*v1alpha1.BackupFileRestore, error) {
-	hash := userHash(u.Name)[:16]
-	for slot := 0; slot < g.cfg.MaxOpenRestores; slot++ {
-		name := fmt.Sprintf("bfr-%s-%d", hash, slot)
-		for attempt := 0; attempt < 2; attempt++ {
-			fr := &v1alpha1.BackupFileRestore{
-				ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{userLabel: userHash(u.Name)}},
-				Spec:       spec,
-			}
-			err := g.c.Create(ctx, fr)
-			if err == nil {
-				return fr, nil
-			}
-			if !apierrors.IsAlreadyExists(err) {
-				return nil, err
-			}
-			old := &v1alpha1.BackupFileRestore{}
-			if gerr := g.c.Get(ctx, types.NamespacedName{Name: name}, old); gerr != nil {
-				if apierrors.IsNotFound(gerr) {
-					continue
-				}
-				return nil, gerr
-			}
-			if old.Status.Phase != "Done" && old.Status.Phase != "Failed" {
-				break // taken by a restore that has not ended: try the next slot
-			}
-			uid := old.UID
-			if derr := g.c.Delete(ctx, old, client.Preconditions{UID: &uid}); derr != nil && !apierrors.IsNotFound(derr) {
-				break
-			}
+	hash := userHash(u.Name)
+	fr := &v1alpha1.BackupFileRestore{
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "bfr-" + hash[:16] + "-", Labels: map[string]string{userLabel: hash},
+			Annotations: map[string]string{v1alpha1.FileRestoreAwaitingAdmission: "true"}},
+		Spec: spec,
+	}
+	if err := g.c.Create(ctx, fr); err != nil {
+		return nil, err
+	}
+	list := &v1alpha1.BackupFileRestoreList{}
+	if err := g.c.List(ctx, list, client.MatchingLabels{userLabel: hash}); err != nil {
+		g.removeRestore(ctx, fr)
+		return nil, err
+	}
+	open := 0
+	for i := range list.Items {
+		if p := list.Items[i].Status.Phase; p != "Done" && p != "Failed" {
+			open++
 		}
 	}
-	return nil, errNoSlot
+	if open > g.cfg.MaxOpenRestores {
+		g.removeRestore(ctx, fr)
+		return nil, errNoSlot
+	}
+	admitted := fr.DeepCopy()
+	delete(admitted.Annotations, v1alpha1.FileRestoreAwaitingAdmission)
+	if err := g.c.Patch(ctx, admitted, client.MergeFrom(fr)); err != nil {
+		g.removeRestore(ctx, fr)
+		return nil, err
+	}
+	return admitted, nil
+}
+
+func (g *Gateway) removeRestore(ctx context.Context, fr *v1alpha1.BackupFileRestore) {
+	if err := g.c.Delete(ctx, fr); err != nil && !apierrors.IsNotFound(err) {
+		klog.ErrorS(err, "Remove a refused file restore failed", "restore", fr.Name)
+	}
 }
 
 func firstLine(s string) string {

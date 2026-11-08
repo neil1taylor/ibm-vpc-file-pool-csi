@@ -1005,10 +1005,10 @@ pvc-bbb11111-2222-3333-4444-555566667777      repl-app-logs     pool-tutorial-re
 pvc-ccc11111-2222-3333-4444-555566667777      repl-app-config   pool-tutorial-repl   2           5m11s ago      dr-driver
 
 To execute failover, run:
-  kubectl failover execute --nfs-mount-path /data --dr-pool <POOL> --dr-share-ip <IP>
+  kubectl failover execute --nfs-mount-path /data --dr-pool <POOL> --dr-share-ip <IP> --dr-export-path <EXPORT_PATH>
 ```
 
-The last line is what the tool prints. Step 9b shows how to find the values, and you also need `--dr-export-path` (see Step 9b).
+The last line is what the tool prints, with every flag the run needs. Replace `<POOL>`, `<IP>` and `<EXPORT_PATH>`; Step 9b shows how to find the values. If you gave `--rewind-to`, `--vms` or `--force` to the plan, the line carries them over.
 
 **What this does:**
 - Scans `/data/pvcs/` for directories containing `.subvolume-metadata.json`
