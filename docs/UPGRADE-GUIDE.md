@@ -134,7 +134,7 @@ kubectl get crd filesharepools.storage.ibmcloud.io -o json | \
 
 **CRD changes:** none. You do not need to apply the CRDs.
 
-**Chart changes:** `backupGateway.resources` now has a default (50m CPU and 64Mi memory requested, 256Mi memory limit), so the gateway pod is no longer without limits. If you set `backupGateway.resources` yourself, your value is used. New value `consolePlugin.image.pullPolicy` (default `IfNotPresent`).
+**Chart changes:** The gateway ClusterRole gains the `patch` verb on `backupfilerestores`, which the chart applies. `backupGateway.resources` now has a default (50m CPU and 64Mi memory requested, 256Mi memory limit), so the gateway pod is no longer without limits. If you set `backupGateway.resources` yourself, your value is used. New value `consolePlugin.image.pullPolicy` (default `IfNotPresent`).
 
 **Action required:** nothing. Set `image.tag` and `consolePlugin.image.tag` to `v0.19.5` if you pin them. To go back, run `helm rollback`.
 

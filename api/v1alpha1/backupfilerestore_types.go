@@ -5,6 +5,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+// FileRestoreAwaitingAdmission is on a BackupFileRestore the gateway has made
+// but not yet admitted: the gateway removes it once the user is within the limit
+// of open restores. The controller ignores a restore that carries it, and
+// deletes one that carries it for too long (a gateway that stopped half way).
+const FileRestoreAwaitingAdmission = "storage.ibmcloud.io/awaiting-admission"
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=bfr

@@ -429,3 +429,43 @@ func TestRestoreTwoInARowKeepTheirOwnNames(t *testing.T) {
 		}
 	}
 }
+
+// spyClient records what the gateway creates: a restore must carry the
+// awaiting-admission mark from the moment it exists.
+type spyClient struct {
+	client.Client
+	unmarked atomic.Int32
+}
+
+func (s *spyClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if _, ok := obj.(*v1alpha1.BackupFileRestore); ok && obj.GetAnnotations()[v1alpha1.FileRestoreAwaitingAdmission] == "" {
+		s.unmarked.Add(1)
+	}
+	return s.Client.Create(ctx, obj, opts...)
+}
+
+func TestRestoreOverTheLimitIsNeverRunnableAndNeverAudited(t *testing.T) {
+	e := newRestoreEnv(t)
+	spy := &spyClient{Client: e.g.c}
+	e.g.c = spy
+	e.g.cfg.MaxOpenRestores = 1
+	if resp, body := e.do("POST", "/v1/restores", "alice-token", newReq()); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("first: %d %s", resp.StatusCode, body)
+	}
+	events := len(e.events())
+	req := newReq()
+	req["targetName"] = "second"
+	if resp, body := e.do("POST", "/v1/restores", "alice-token", req); resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("second: %d %s", resp.StatusCode, body)
+	}
+	if spy.unmarked.Load() != 0 {
+		t.Error("a restore was created without the awaiting-admission mark")
+	}
+	if len(e.events()) != events {
+		t.Error("an audit Event was written for a refused request")
+	}
+	rs := e.restores()
+	if len(rs) != 1 || rs[0].Annotations[v1alpha1.FileRestoreAwaitingAdmission] != "" {
+		t.Fatalf("restores %+v: only the admitted one may be left, without the mark", rs)
+	}
+}

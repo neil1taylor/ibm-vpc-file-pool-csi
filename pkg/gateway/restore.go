@@ -223,15 +223,20 @@ var errNoSlot = errors.New("all restore slots of the user are taken")
 
 // createInSlot makes the restore under a name of its own, bfr-<user hash>-<random>,
 // so a later restore never replaces it; the controller deletes an ended restore
-// after its keep time. The limit on open restores is checked after the create:
-// if the user then has more than the limit that have not ended, this restore is
-// removed again and refused. So parallel requests, also at several replicas,
-// never pass the limit. At the limit they may all be refused; the user asks again.
+// after its keep time. The restore is made with the awaiting-admission mark,
+// which the controller ignores. Then the user's open restores are counted
+// (this one and any other not yet admitted included). Within the limit the mark
+// is removed and the restore can run; over it the restore is deleted and refused,
+// so a refused request never becomes runnable. Parallel requests, also at several
+// replicas, never pass the limit; at the limit they may all be refused, and the
+// user asks again. A gateway that stops between the steps leaves a marked restore,
+// which the controller deletes after a few minutes.
 func (g *Gateway) createInSlot(ctx context.Context, u User, spec v1alpha1.BackupFileRestoreSpec) (*v1alpha1.BackupFileRestore, error) {
 	hash := userHash(u.Name)
 	fr := &v1alpha1.BackupFileRestore{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "bfr-" + hash[:16] + "-", Labels: map[string]string{userLabel: hash}},
-		Spec:       spec,
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "bfr-" + hash[:16] + "-", Labels: map[string]string{userLabel: hash},
+			Annotations: map[string]string{v1alpha1.FileRestoreAwaitingAdmission: "true"}},
+		Spec: spec,
 	}
 	if err := g.c.Create(ctx, fr); err != nil {
 		return nil, err
@@ -251,7 +256,13 @@ func (g *Gateway) createInSlot(ctx context.Context, u User, spec v1alpha1.Backup
 		g.removeRestore(ctx, fr)
 		return nil, errNoSlot
 	}
-	return fr, nil
+	admitted := fr.DeepCopy()
+	delete(admitted.Annotations, v1alpha1.FileRestoreAwaitingAdmission)
+	if err := g.c.Patch(ctx, admitted, client.MergeFrom(fr)); err != nil {
+		g.removeRestore(ctx, fr)
+		return nil, err
+	}
+	return admitted, nil
 }
 
 func (g *Gateway) removeRestore(ctx context.Context, fr *v1alpha1.BackupFileRestore) {

@@ -24,16 +24,7 @@ To make a release:
 Four faults found in the v0.19.4 lab runs are fixed.
 
 - **A restore of files from a VM disk into a new claim fails at once when the pool has no default owner (issue #434).** Before, it stayed in `Restoring` for ever. Now it fails with a message that names the pool and says to set `defaultUID` and `defaultGID` on the `FileSharePool`.
-- **Each file restore keeps its own name (issue #435).** Two restores by the same user in a row used to get the same name, so the second replaced the first. Each now has a name of its own (`bfr-<user hash>-<random>`) and `kubectl backup restore-files --status NAME` works for each until the ended restore is deleted. The limit of 10 open restores for each user still holds.
-- **The failover plan prints a complete `To execute` line (issue #439).** The line now includes `--dr-export-path`, and carries over `--rewind-to`, `--vms` and `--force` when the plan was given them.
-- **The backup gateway pod has requests and limits (issue #444).** `backupGateway.resources` is now in `values.yaml` (50m CPU and 64Mi memory requested, 256Mi memory limit). `consolePlugin.image.pullPolicy` is now in `values.yaml` too (`IfNotPresent`).
-
-## [v0.19.5] — not yet released
-
-Four faults found in the v0.19.4 lab runs are fixed.
-
-- **A restore of files from a VM disk into a new claim fails at once when the pool has no default owner (issue #434).** Before, it stayed in `Restoring` for ever. Now it fails with a message that names the pool and says to set `defaultUID` and `defaultGID` on the `FileSharePool`.
-- **Each file restore keeps its own name (issue #435).** Two restores by the same user in a row used to get the same name, so the second replaced the first. Each now has a name of its own (`bfr-<user hash>-<random>`) and `kubectl backup restore-files --status NAME` works for each until the ended restore is deleted. The limit of 10 open restores for each user still holds.
+- **Each file restore keeps its own name (issue #435).** Two restores by the same user in a row used to get the same name, so the second replaced the first. Each now has a name of its own (`bfr-<user hash>-<random>`) and `kubectl backup restore-files --status NAME` works for each until the ended restore is deleted. The limit of 10 open restores for each user still holds: a new restore is ignored by the controller until the gateway has counted the user's open restores and admitted it, and a refused request never runs.
 - **The failover plan prints a complete `To execute` line (issue #439).** The line now includes `--dr-export-path`, and carries over `--rewind-to`, `--vms` and `--force` when the plan was given them.
 - **The backup gateway pod has requests and limits (issue #444).** `backupGateway.resources` is now in `values.yaml` (50m CPU and 64Mi memory requested, 256Mi memory limit). `consolePlugin.image.pullPolicy` is now in `values.yaml` too (`IfNotPresent`).
 
