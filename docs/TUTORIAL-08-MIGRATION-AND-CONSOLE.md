@@ -5,7 +5,9 @@
 Migrate PVCs from the stock IBM VPC File CSI driver to the pool-based driver, then enable and explore the OpenShift Console dynamic plugin for visual pool management.
 
 **Cluster:** ROKS eu-de (OpenShift Virtualization enabled)
-**Zone:** eu-de-1
+**Zone:** eu-de-1 (the examples use `eu-de-1`; use a zone your cluster has, `eu-de-3` on the production lab)
+
+**Status:** run end to end on the production lab (rovslab-prod-eude, 8 November 2026, driver v0.19.4), in the CLI and the console. The CLI steps gave the output shown below, and the checksums of the three files matched after the copy. The migration of a 10 GiB claim with 5 MB of data took 10 seconds. The console part was run on the same cluster. Where the page differs from the older text, this page now says what the console shows.
 
 ---
 
@@ -388,8 +390,8 @@ The console can do the same migration. On the Pools tab, choose **Migrate volume
 
 1. Choose the source storage class and the namespace. The table lists the claims.
 2. A claim that a pod uses cannot move: the row names the pods. Stop the application first.
-3. Choose **Migrate**, pick the target pool, and confirm. The page refuses a claim that does not fit the free space of the pool.
-4. The page makes the new claim `<name>-pooled` and the pod `migrate-<name>`, as the `kubectl migrate` tool does. The row shows the copy, with a link to the pod log. When it says "Copied", point your application at the new claim.
+3. Choose **Migrate** on the row. A box opens with the target pool already chosen and the free space of the pool (for example "90 GB free in pool ops-pool"). Change the pool if you need to, and choose **Start migration**. The page refuses a claim that does not fit the free space of the pool.
+4. The page makes the new claim `<name>-pooled` and the pod `migrate-<name>`, as the `kubectl migrate` tool does. When the row says "Copied. Switch your application to `<name>-pooled`, then delete the old claim when you are sure.", point your application at the new claim. A claim with no data was copied in under 20 seconds. The page also shows claims that you already moved with `kubectl migrate`, as "Copied", and greys out their button.
 
 The page never deletes the old claim. Delete it yourself when you are sure the new one is right.
 
@@ -439,13 +441,14 @@ After a few seconds, refresh the OpenShift Console. A new "IBM VPC File Pools" i
 
 ## Step 9: Console Plugin -- Tour
 
-The console plugin adds the following pages to the OpenShift Console. The pages are tabs of one "IBM VPC File Pools" page under Storage.
+The console plugin adds the following pages to the OpenShift Console. The pages are tabs of one "IBM VPC File Pools" page under Storage: Overview, Pools, SubVolumes, Snapshots, Replication, Backups, Monitoring and PoolBench. This part tours the first five and Monitoring. The Backups tab is in [Part 16](TUTORIAL-16-CONSOLE-BACKUPS-CLONES-RECEIVER.md).
 
 ### Overview
 
 The first tab shows a high-level overview of all pools:
 
 - **Stat cards** at the top: Total Pools (with health indicator), Total Capacity (allocated vs total), Total SubVolumes, and Active Alerts (pools not in Ready state)
+- **Firing alerts** (only when an alert fires): a table of alert name, severity and the pool it is about
 - **Performance metrics row**: Allocation rate (per hour), P95 allocation latency (color-coded: green < 100ms, yellow < 500ms, red > 500ms), and VPC API health (calls/min, error rate, P95 latency)
 - **Capacity breakdown**: Aggregate capacity donut chart on the left, per-pool capacity bars on the right with share count indicators
 - **Replication status** (conditional -- only shown when ReplicationPolicy CRs exist): Replication lag per policy (color-coded), sync rate, and consecutive failures
@@ -461,13 +464,13 @@ The first tab shows a high-level overview of all pools:
 ### SubVolumes
 
 - **List page**: Filterable list of all SubVolumes with columns for name, pool, PVC namespace/name, size, share ID, and phase. Filter by pool name or phase.
-- **Create page**: Create a SubVolume manually (rarely needed -- PVCs create them automatically).
+- **Create**: the list is read-only, because the driver writes SubVolumes. To add a volume, create a claim; the **Create volume (PVC)** button starts that.
 - **Details page**: SubVolume spec (pool, PVC reference, requested GB, share ID, sub-path), status (phase, clone status), and conditions table.
 
 ### Snapshots
 
-- **List page**: All Snapshot CRs with pool, source SubVolume, creation time, size, and phase.
-- **Create page**: Select a SubVolume to snapshot, provide a name, and create. Validates that the source SubVolume exists and is in a healthy state.
+- **List page**: The Snapshot records the driver writes, with pool, source SubVolume, size, phase, ready and age. The list is read-only. Banners above it say that VM snapshots are instant, and that snapshots of a running VM are not supported by Red Hat.
+- **Create snapshot**: the button starts a new snapshot. The driver writes the Snapshot record.
 - **Details page**: Snapshot metadata, source SubVolume reference, creation timestamp, and restore action.
 
 For the disk of a running VM, a snapshot is a QEMU copy or an instant snapshot, not a plain file copy. See [Part 2](TUTORIAL-02-SNAPSHOTS-AND-CLONES.md).
