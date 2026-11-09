@@ -19,7 +19,7 @@ To make a release:
 
 ## [Unreleased]
 
-## [v0.19.5] — not yet released
+## [v0.19.5] — 2026-11-09
 
 Four faults found in the v0.19.4 lab runs are fixed.
 
