@@ -61,6 +61,7 @@ extra_css:
 nav:
   - Home: README.md
   - Getting Started:
+      - Start Here: START-HERE.md
       - Installation: INSTALL.md
       - User Guide: USER-GUIDE.md
       - Tutorial: TUTORIAL.md

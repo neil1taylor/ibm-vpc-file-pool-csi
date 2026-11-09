@@ -1,6 +1,6 @@
 # Tutorial Series — IBM VPC File Pool CSI Driver
 
-Hands-on tutorials covering every major capability of the pool CSI driver. Each part is self-contained with its own setup and cleanup — follow them in any order after Part 1. The words used here are defined in [CONTEXT.md](CONTEXT.md).
+New to the driver? Start with [Getting started](START-HERE.md). Hands-on tutorials covering every major capability of the pool CSI driver. Each part is self-contained with its own setup and cleanup — follow them in any order after Part 1. The words used here are defined in [CONTEXT.md](CONTEXT.md).
 
 **Cluster:** ROKS (OpenShift Virtualization enabled)
 

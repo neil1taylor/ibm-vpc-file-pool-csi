@@ -262,6 +262,7 @@ go test ./pkg/pool/ -v -race -run TestAllocate_SpreadStrategy
 
 | Document | Description |
 |----------|-------------|
+| [START-HERE.md](docs/START-HERE.md) | First volume in 10 minutes, and where to go next |
 | [INSTALL.md](docs/INSTALL.md) | Build, deploy, and Helm chart |
 | [USER-GUIDE.md](docs/USER-GUIDE.md) | End-user guide: pools, PVCs, snapshots, clones |
 | [FAQ.md](docs/FAQ.md) | Frequently asked questions |
