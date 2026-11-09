@@ -1,0 +1,29 @@
+# Pool with performance tiers — separate IOPS profiles for different workloads.
+# Use tier-specific StorageClasses to direct PVCs to the right performance level.
+apiVersion: storage.ibmcloud.io/v1alpha1
+kind: FileSharePool
+metadata:
+  name: tiered-pool
+spec:
+  zone: us-south-1
+  profile: dp2
+  shareSizeGB: 4000
+  maxShares: 10
+  initialShares: 2
+  autoExpand: true
+  expandThresholdPercent: 80
+  allocationStrategy: spread
+  defaultPermissions: "0755"
+  defaultUID: 1000
+  defaultGID: 1000
+  resourceGroup: "your-resource-group-id"
+  tiers:
+    - name: standard
+      iops: 1000
+      description: "Standard tier for general workloads"
+    - name: high-iops
+      iops: 10000
+      description: "High-IOPS tier for databases and analytics"
+  tags:
+    - "env:production"
+    - "tiered:true"

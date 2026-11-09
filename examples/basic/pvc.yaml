@@ -1,0 +1,14 @@
+# Basic PVC — allocates a 5 GB subdirectory from the pool.
+# Binds in under a second (no VPC API call needed).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-app-data
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ibm-vpc-file-pool
+  resources:
+    requests:
+      storage: 5Gi
